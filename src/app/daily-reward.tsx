@@ -8,7 +8,7 @@ import { SplashBackground } from '@/components/splash/splash-background';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 
 const TITLE = require('@/assets/images/daily-reward/title.png');
-const DAY7_BAR = require('@/assets/images/daily-reward/day7-bar.png');
+const DAY7_BAR = require('@/assets/images/ui/panel-bar.png');
 const CLAIM_BUTTON = require('@/assets/images/ui/pill-button.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
 

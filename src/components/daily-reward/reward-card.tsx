@@ -5,7 +5,7 @@ import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 
 const CARD_BG = require('@/assets/images/daily-reward/card.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
-const UTILITY_ICON = require('@/assets/images/daily-reward/icon-utility.png');
+const UTILITY_ICON = require('@/assets/images/ui/icon-utility.png');
 const CHIP_ICON = require('@/assets/images/daily-reward/icon-chip.png');
 
 const ICONS = { gem: GEM_ICON, utility: UTILITY_ICON, chip: CHIP_ICON };
