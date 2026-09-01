@@ -48,6 +48,10 @@ export default function RootLayout() {
               name="daily-reward"
               options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
             />
+            <Stack.Screen
+              name="settings"
+              options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+            />
           </Stack>
         )}
       </SafeAreaProvider>

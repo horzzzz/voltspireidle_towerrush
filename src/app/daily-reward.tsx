@@ -9,7 +9,7 @@ import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 
 const TITLE = require('@/assets/images/daily-reward/title.png');
 const DAY7_BAR = require('@/assets/images/daily-reward/day7-bar.png');
-const CLAIM_BUTTON = require('@/assets/images/daily-reward/claim-button.png');
+const CLAIM_BUTTON = require('@/assets/images/ui/pill-button.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
 
 const CURRENT_DAY = 1;

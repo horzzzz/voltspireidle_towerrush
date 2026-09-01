@@ -16,6 +16,7 @@ const noop = () => {};
 
 function handleRailPress(key: string) {
   if (key === 'daily') router.push('/daily-reward');
+  if (key === 'settings') router.push('/settings');
 }
 
 /** Main menu / idle hub (Figma node 1:114). */
