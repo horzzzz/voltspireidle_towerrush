@@ -41,7 +41,15 @@ export default function RootLayout() {
         <StatusBar style="light" />
         {phase === 'loading' && <LoadingScreen onDone={handleLoadingDone} />}
         {phase === 'start' && <StartScreen onStart={handleStart} />}
-        {phase === 'app' && <Stack screenOptions={{ headerShown: false }} />}
+        {phase === 'app' && (
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen
+              name="daily-reward"
+              options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+            />
+          </Stack>
+        )}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

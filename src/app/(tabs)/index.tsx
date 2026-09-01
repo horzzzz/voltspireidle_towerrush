@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SideRail } from '@/components/menu/side-rail';
@@ -12,6 +13,10 @@ const BATTLE_BUTTON = require('@/assets/images/menu/battle-button.png');
 const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
 const noop = () => {};
+
+function handleRailPress(key: string) {
+  if (key === 'daily') router.push('/daily-reward');
+}
 
 /** Main menu / idle hub (Figma node 1:114). */
 export default function GameScreen() {
@@ -27,7 +32,7 @@ export default function GameScreen() {
         <View style={styles.reactorWrap}>
           <Image source={REACTOR} style={styles.reactor} contentFit="contain" />
           <View style={styles.rail}>
-            <SideRail onPress={noop} />
+            <SideRail onPress={handleRailPress} />
           </View>
         </View>
       </View>
