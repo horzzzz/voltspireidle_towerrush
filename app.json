@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Voltspire: Idle Tower Rush",
+    "slug": "voltspireidle_towerrush",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "voltspireidletowerrush",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.voltspireidle.towerrush"
+    },
+    "android": {
+      "package": "com.voltspireidle.towerrush",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#000000",
+          "image": "./assets/images/splash/blank.png",
+          "imageWidth": 200
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
