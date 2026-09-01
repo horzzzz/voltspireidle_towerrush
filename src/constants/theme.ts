@@ -24,3 +24,19 @@ export const Fonts = {
   grenzeMedium: 'Grenze_500Medium',
   grenzeSemiBold: 'Grenze_600SemiBold',
 } as const;
+
+/** Menu / HUD tokens (Figma node 1:114). */
+export const MenuColors = {
+  bg: '#000000',
+  text: '#ffffff',
+  /** Cyan callout text ("SCRAP BONUS…"). */
+  accent: '#00BBFF',
+  /** Brighter cyan ("BEST SCRAP FARM"). */
+  accentBright: '#00E5FF',
+  /** Bottom nav bar plate. */
+  navBar: 'rgba(20,22,30,0.72)',
+  navBorder: 'rgba(255,255,255,0.10)',
+} as const;
+
+/** Largest width the HUD column is allowed to grow to on wide screens. */
+export const MenuMaxWidth = 480;

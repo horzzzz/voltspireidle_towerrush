@@ -1,9 +1,8 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -26,11 +25,19 @@ type LoadingScreenProps = {
 /** Progress screen shown right after the native splash (Figma node 1:4). */
 export function LoadingScreen({ onDone }: LoadingScreenProps) {
   const progress = useSharedValue(0);
+  const done = useRef(false);
 
   useEffect(() => {
-    progress.value = withTiming(100, { duration: PROGRESS_MS }, (finished) => {
-      if (finished) runOnJS(onDone)();
-    });
+    progress.value = withTiming(100, { duration: PROGRESS_MS });
+    // Advance on a plain timer rather than the animation's completion
+    // callback -- the visual bar is decorative; this is the source of truth.
+    const timer = setTimeout(() => {
+      if (!done.current) {
+        done.current = true;
+        onDone();
+      }
+    }, PROGRESS_MS);
+    return () => clearTimeout(timer);
   }, [progress, onDone]);
 
   const fillStyle = useAnimatedStyle(() => ({ width: `${progress.value}%` }));
@@ -84,6 +91,7 @@ const styles = StyleSheet.create({
   },
   middle: {
     flex: 1,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,

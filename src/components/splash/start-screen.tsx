@@ -36,7 +36,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
             onPressIn={() => setPressed(true)}
             onPressOut={() => setPressed(false)}
             style={[styles.button, pressed && styles.buttonPressed]}>
-            <Image source={BUTTON_ASSET} style={StyleSheet.absoluteFill} contentFit="contain" />
+            <Image source={BUTTON_ASSET} style={styles.buttonImg} contentFit="contain" />
           </Pressable>
 
           <Text style={styles.legal}>
@@ -76,6 +76,7 @@ const styles = StyleSheet.create({
   },
   middle: {
     flex: 1,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -90,6 +91,9 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '80%',
+  },
+  buttonImg: {
+    width: '100%',
     aspectRatio: 600 / 204,
   },
   buttonPressed: {
