@@ -16,21 +16,34 @@ const sqliteStateStorage: StateStorage = {
 interface MetaState {
   /** Banked Scrap from all past runs — what Coilworks will spend, later. */
   scrap: number;
+  /** Premium currency — earned from rewards, spent in the shop catalog. */
+  gems: number;
   highestWave: number;
   /** Folds a finished run's earnings into the persisted totals. */
   addRunResult: (result: RunResult) => void;
+  /**
+   * Spend `gemCost` gems to bank `scrapAmount` scrap (shop catalog).
+   * No-op returning `false` when the player can't afford it.
+   */
+  buyScrap: (gemCost: number, scrapAmount: number) => boolean;
 }
 
 export const useMetaStore = create<MetaState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       scrap: 0,
+      gems: 0,
       highestWave: 0,
       addRunResult: (result) =>
         set((s) => ({
           scrap: s.scrap + result.scrapEarned,
           highestWave: Math.max(s.highestWave, result.waveReached),
         })),
+      buyScrap: (gemCost, scrapAmount) => {
+        if (get().gems < gemCost) return false;
+        set((s) => ({ gems: s.gems - gemCost, scrap: s.scrap + scrapAmount }));
+        return true;
+      },
     }),
     {
       name: 'voltspire-meta',

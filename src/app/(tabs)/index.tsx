@@ -20,6 +20,7 @@ function handleRailPress(key: string) {
   if (key === 'daily') router.push('/daily-reward');
   if (key === 'settings') router.push('/settings');
   if (key === 'wheel') router.push('/wheel');
+  if (key === 'shop') router.push('/shop');
 }
 
 /** Main menu / idle hub (Figma node 1:114). */

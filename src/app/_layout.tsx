@@ -57,6 +57,10 @@ export default function RootLayout() {
               name="wheel"
               options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
             />
+            <Stack.Screen
+              name="shop"
+              options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+            />
           </Stack>
         )}
       </SafeAreaProvider>
