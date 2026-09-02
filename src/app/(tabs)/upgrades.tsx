@@ -1,102 +1,91 @@
-import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SectionHeader } from '@/components/upgrades/section-header';
 import { UnlockPanel } from '@/components/upgrades/unlock-panel';
-import { UpgradeRow } from '@/components/upgrades/upgrade-row';
+import { UpgradeRow, type UpgradeCategory } from '@/components/upgrades/upgrade-row';
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { formatNumber } from '@/game/core/numbers';
+import {
+  COILWORKS_DEFS,
+  COILWORKS_ORDER,
+  coilworksCost,
+  coilworksValue,
+  isCoilworksMaxed,
+  type CoilworksUpgradeId,
+} from '@/game/data/coilworks';
+import { useMetaStore } from '@/game/state/meta-store';
 
 const noop = () => {};
 
-/** Upgrades tab — "Coilworks" (Figma node 1:399). Values and buys are stubs. */
+function formatStat(unit: string, value: number): string {
+  return formatNumber(value, unit === '%' ? 1 : 2) + unit;
+}
+
+/** Coilworks — the permanent, Scrap-funded upgrade tree (Figma node 1:399). */
 export default function UpgradesScreen() {
-  // Tapping an "UNLOCK …" panel reveals its upgrade row, styled like the rest.
-  const [unlocked, setUnlocked] = useState({ critical: false, armor: false, charge: false });
-  const unlock = (key: keyof typeof unlocked) => () =>
-    setUnlocked((u) => ({ ...u, [key]: true }));
+  const scrap = useMetaStore((s) => s.scrap);
+  const gems = useMetaStore((s) => s.gems);
+  const levels = useMetaStore((s) => s.coilworks);
+  const unlocked = useMetaStore((s) => s.coilworksUnlocked);
+  const buyCoilworks = useMetaStore((s) => s.buyCoilworks);
+  const unlockCoilworks = useMetaStore((s) => s.unlockCoilworks);
+
+  function renderRow(id: CoilworksUpgradeId, category: UpgradeCategory) {
+    const def = COILWORKS_DEFS[id];
+
+    if (!unlocked[id]) {
+      return (
+        <UnlockPanel
+          key={id}
+          label={`Unlock ${def.label.toLowerCase()} upgrades`}
+          price={formatNumber(def.unlockCost ?? 0, 0)}
+          onPress={() => unlockCoilworks(id)}
+        />
+      );
+    }
+
+    const level = levels[id];
+    const maxed = isCoilworksMaxed(def, level);
+    const cost = maxed ? null : coilworksCost(def, level);
+    const affordable = cost == null || scrap >= cost;
+
+    return (
+      <UpgradeRow
+        key={id}
+        category={category}
+        name={def.label}
+        from={formatStat(def.unit, coilworksValue(def, level))}
+        to={maxed ? '' : formatStat(def.unit, coilworksValue(def, level + 1))}
+        price={cost != null ? formatNumber(cost, 0) : undefined}
+        maxed={maxed}
+        disabled={!maxed && !affordable}
+        onBuy={() => buyCoilworks(id)}
+      />
+    );
+  }
+
+  const attackIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'attack');
+  const defenseIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'defense');
+  const utilityIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'utility');
 
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}>
-      <TopBar scrap="45.4" gems="7" onEnergyPress={noop} />
+      <TopBar scrap={formatNumber(scrap)} gems={formatNumber(gems)} onEnergyPress={noop} />
 
       <Text style={styles.title}>Coilworks</Text>
 
       <SectionHeader title="Attack upgrades" />
-      <UpgradeRow category="attack" name="Damage" from="14" to="14.66" price="20" onBuy={noop} />
-      <UpgradeRow
-        category="attack"
-        name="Attack speed"
-        from="1.0"
-        to="1.03/s"
-        price="25"
-        onBuy={noop}
-      />
-      {unlocked.critical ? (
-        <UpgradeRow
-          category="attack"
-          name="Critical chance"
-          from="0.00"
-          to="1.00%"
-          price="30"
-          onBuy={noop}
-        />
-      ) : (
-        <UnlockPanel
-          label="Unlock critical chance upgrades"
-          price="30"
-          onPress={unlock('critical')}
-        />
-      )}
+      {attackIds.map((id) => renderRow(id, 'attack'))}
 
       <SectionHeader title="Defense upgrades" />
-      <UpgradeRow category="defense" name="Health" from="6" to="6.28" price="25" onBuy={noop} />
-      <UpgradeRow
-        category="defense"
-        name="Health regen"
-        from="0.2"
-        to="0.21/s"
-        price="25"
-        onBuy={noop}
-      />
-      <UpgradeRow
-        category="defense"
-        name="Deflection"
-        from="0.00"
-        to="0.50%"
-        price="60"
-        onBuy={noop}
-      />
-      {unlocked.armor ? (
-        <UpgradeRow category="defense" name="Armor" from="0" to="1" price="150" onBuy={noop} />
-      ) : (
-        <UnlockPanel label="Unlock armor upgrades" price="150" onPress={unlock('armor')} />
-      )}
+      {defenseIds.map((id) => renderRow(id, 'defense'))}
 
       <SectionHeader title="Utility upgrades" />
-      <UpgradeRow
-        category="utility"
-        name="Scrap/wave"
-        from="1"
-        to="2"
-        price="125"
-        onBuy={noop}
-      />
-      {unlocked.charge ? (
-        <UpgradeRow
-          category="utility"
-          name="Charge bonus"
-          from="0"
-          to="5%"
-          price="50"
-          onBuy={noop}
-        />
-      ) : (
-        <UnlockPanel label="Unlock charge bonuses" price="50" onPress={unlock('charge')} />
-      )}
+      {utilityIds.map((id) => renderRow(id, 'utility'))}
 
       <View style={styles.bottomSpace} />
     </ScrollView>

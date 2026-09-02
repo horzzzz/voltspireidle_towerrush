@@ -3,7 +3,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
-import { isUpgradeMaxed, upgradeCost, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
+import { isUpgradeMaxed, loadoutBaseFor, upgradeCost, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
+import type { RunLoadout } from '@/game/core/types';
 
 const ICONS: Record<UpgradeDef['icon'], number> = {
   damage: require('@/assets/images/battle/up-damage.png'),
@@ -12,10 +13,14 @@ const ICONS: Record<UpgradeDef['icon'], number> = {
   regen: require('@/assets/images/battle/up-regen.png'),
   shield: require('@/assets/images/battle/up-shield.png'),
   scrap: require('@/assets/images/battle/up-scrap.png'),
+  // No dedicated battle-icon art for these two — reuse the Coilworks
+  // category icons (same PNGs the Attack/Defense section headers use there).
+  crit: require('@/assets/images/ui/icon-attack.png'),
+  armor: require('@/assets/images/ui/icon-defense.png'),
 };
 
-function formatStat(def: UpgradeDef, level: number): string {
-  const value = upgradeValue(def, level);
+function formatStat(def: UpgradeDef, level: number, base: number | undefined): string {
+  const value = upgradeValue(def, level, base);
   return formatNumber(value, def.unit === '%' ? 1 : 2) + def.unit;
 }
 
@@ -23,14 +28,16 @@ type UpgradeRowProps = {
   def: UpgradeDef;
   level: number;
   charge: number;
+  loadout: RunLoadout;
   onBuy: () => void;
 };
 
 /** One buyable in-run upgrade (Figma node 1:1549) — icon, current → next stat, Charge cost. */
-export function UpgradeRow({ def, level, charge, onBuy }: UpgradeRowProps) {
+export function UpgradeRow({ def, level, charge, loadout, onBuy }: UpgradeRowProps) {
   const maxed = isUpgradeMaxed(def, level);
   const cost = maxed ? null : upgradeCost(def, level);
   const affordable = cost != null && charge >= cost;
+  const base = loadoutBaseFor(def.id, loadout);
 
   return (
     <Pressable
@@ -41,8 +48,8 @@ export function UpgradeRow({ def, level, charge, onBuy }: UpgradeRowProps) {
       <View style={styles.labels}>
         <Text style={styles.name}>{def.label}</Text>
         <Text style={styles.values}>
-          {formatStat(def, level)} <Text style={styles.arrow}>→</Text>{' '}
-          <Text style={styles.to}>{maxed ? 'MAX' : formatStat(def, level + 1)}</Text>
+          {formatStat(def, level, base)} <Text style={styles.arrow}>→</Text>{' '}
+          <Text style={styles.to}>{maxed ? 'MAX' : formatStat(def, level + 1, base)}</Text>
         </Text>
       </View>
       {!maxed && (

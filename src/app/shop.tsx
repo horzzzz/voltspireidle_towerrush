@@ -8,6 +8,7 @@ import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
+import { SCRAP_PACKS, SHOP_DAILY_GIFT_GEMS } from '@/game/data/shop';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const PANEL = require('@/assets/images/ui/panel-bar.png');
@@ -18,14 +19,10 @@ const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
 type Tab = 'daily' | 'catalog';
 
-/** Scrap packs sold for gems. Prices scale down per unit as the pack grows. */
-const SCRAP_PACKS: { scrap: number; gems: number }[] = [
-  { scrap: 25, gems: 10 },
-  { scrap: 50, gems: 18 },
-  { scrap: 100, gems: 30 },
-];
-
 const close = () => router.back();
+// TODO(ads): rewarded video grants SHOP_DAILY_GIFT_GEMS once per day, gated the same way as
+// game-over's x2 and the hub's x2-scrap pill. Inert until AdMob is wired up.
+const noop = () => {};
 
 /**
  * Wide art panel (`panel-bar.png`). The sizing Image is an in-flow child with
@@ -77,14 +74,16 @@ export default function ShopScreen() {
 
         {tab === 'daily' ? (
           <View style={styles.list}>
-            <Panel>
-              <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
-              <Text style={styles.panelTitle}>Daily gems gift</Text>
-              <View style={styles.row}>
-                <Text style={styles.amount}>+10</Text>
-                <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
-              </View>
-            </Panel>
+            <Pressable onPress={noop} style={({ pressed }) => pressed && styles.panelPressed}>
+              <Panel>
+                <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
+                <Text style={styles.panelTitle}>Daily gems gift</Text>
+                <View style={styles.row}>
+                  <Text style={styles.amount}>+{SHOP_DAILY_GIFT_GEMS}</Text>
+                  <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
+                </View>
+              </Panel>
+            </Pressable>
           </View>
         ) : (
           <View style={styles.list}>

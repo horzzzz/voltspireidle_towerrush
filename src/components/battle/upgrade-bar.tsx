@@ -17,14 +17,27 @@ export function UpgradeBar({ onBuy }: UpgradeBarProps) {
   const insets = useSafeAreaInsets();
   const levels = useBattleStore((s) => s.upgradeLevels);
   const charge = useBattleStore((s) => s.charge);
+  const loadout = useBattleStore((s) => s.loadout);
+  // A stat gated behind an unbought Coilworks unlock (Crit chance, Armor)
+  // has no row here at all — buying it in Coilworks is what makes it show
+  // up, same rule as the "заблокированные скиллы" the Coilworks screen
+  // itself already hides behind an UNLOCK panel.
+  const visibleOrder = UPGRADE_ORDER.filter((id) => loadout.runUpgradesUnlocked[id]);
 
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 8 }]}
       showsVerticalScrollIndicator={false}>
-      {UPGRADE_ORDER.map((id) => (
-        <UpgradeRow key={id} def={UPGRADE_DEFS[id]} level={levels[id]} charge={charge} onBuy={() => onBuy(id)} />
+      {visibleOrder.map((id) => (
+        <UpgradeRow
+          key={id}
+          def={UPGRADE_DEFS[id]}
+          level={levels[id]}
+          charge={charge}
+          loadout={loadout}
+          onBuy={() => onBuy(id)}
+        />
       ))}
     </ScrollView>
   );

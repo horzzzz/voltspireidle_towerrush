@@ -2,7 +2,8 @@ import { create } from 'zustand';
 
 import { getTowerMaxHealth } from '../data/tower-stats';
 import { getWaveConfig } from '../data/waves';
-import type { BattlePhase, BoltEffect, DamagePopup, RunResult, UpgradeId, WorldState } from '../core/types';
+import { defaultRunLoadout } from '../core/types';
+import type { BattlePhase, BoltEffect, DamagePopup, RunLoadout, RunSummary, UpgradeId, WorldState } from '../core/types';
 
 /**
  * React-facing mirror of the sim, refreshed at a throttled rate (see
@@ -32,8 +33,10 @@ export interface BattleSnapshot {
   towerHealth: number;
   towerMaxHealth: number;
   upgradeLevels: Record<UpgradeId, number>;
+  /** The run's fixed Coilworks/Voltage bridge — UpgradeRow needs it to show real current→next stats. */
+  loadout: RunLoadout;
   speedMultiplier: number;
-  result: RunResult | null;
+  result: RunSummary | null;
   damagePopups: DamagePopup[];
   bolts: BoltEffect[];
 }
@@ -54,7 +57,17 @@ const INITIAL: BattleSnapshot = {
   killCount: 0,
   towerHealth: 0,
   towerMaxHealth: 0,
-  upgradeLevels: { damage: 0, attackSpeed: 0, health: 0, regen: 0, deflection: 0, scrapBonus: 0 },
+  upgradeLevels: {
+    damage: 0,
+    attackSpeed: 0,
+    critChance: 0,
+    health: 0,
+    regen: 0,
+    deflection: 0,
+    armor: 0,
+    scrapBonus: 0,
+  },
+  loadout: defaultRunLoadout(),
   speedMultiplier: 1,
   result: null,
   damagePopups: [],
@@ -78,8 +91,9 @@ export const useBattleStore = create<BattleStore>((set) => ({
       scrapEarned: world.scrapEarned,
       killCount: world.killCount,
       towerHealth: world.tower.health,
-      towerMaxHealth: getTowerMaxHealth(world.tower.levels),
+      towerMaxHealth: getTowerMaxHealth(world.tower.levels, world.loadout),
       upgradeLevels: world.tower.levels,
+      loadout: world.loadout,
       speedMultiplier: world.speedMultiplier,
       result: world.result,
       damagePopups: world.damagePopups,

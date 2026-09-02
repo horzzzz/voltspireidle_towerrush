@@ -35,15 +35,15 @@ export function StatsPanel({
         </View>
 
         <View style={styles.rowMid}>
-          <Pressable onPress={onPrev} hitSlop={12}>
-            <Image source={ARROW} style={styles.arrow} contentFit="contain" />
+          <Pressable onPress={onPrev} disabled={!onPrev} hitSlop={12}>
+            <Image source={ARROW} style={[styles.arrow, !onPrev && styles.arrowDim]} contentFit="contain" />
           </Pressable>
           <View style={styles.tierBox}>
             <Text style={styles.tier}>{tier}</Text>
             <Text style={styles.mult}>{multiplier}</Text>
           </View>
-          <Pressable onPress={onNext} hitSlop={12}>
-            <Image source={ARROW} style={[styles.arrow, styles.arrowFlip]} contentFit="contain" />
+          <Pressable onPress={onNext} disabled={!onNext} hitSlop={12}>
+            <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !onNext && styles.arrowDim]} contentFit="contain" />
           </Pressable>
         </View>
 
@@ -124,4 +124,5 @@ const styles = StyleSheet.create({
   },
   arrow: { width: 14, height: 12 },
   arrowFlip: { transform: [{ scaleX: -1 }] },
+  arrowDim: { opacity: 0.35 },
 });

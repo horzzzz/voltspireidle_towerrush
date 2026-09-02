@@ -9,6 +9,17 @@ export const SPAWN_INTERVAL = 0.55;
 /** Pause after a wave is fully cleared, before the next one starts. */
 export const WAVE_CLEAR_PAUSE = 1.5;
 
+/**
+ * No dedicated gem-carrier enemy type (per user direction) — instead, one
+ * random enemy in the spawn queue is flagged every GEM_WAVE_INTERVAL waves,
+ * visually identical to its kind, and drops a gem on death. Capped per run
+ * so it can't be farmed by grinding low waves forever (the original caps
+ * its own gem-carriers for the same reason — see voltspire-original-teardown
+ * memory's "Носители выплат").
+ */
+export const GEM_WAVE_INTERVAL = 3;
+export const MAX_GEMS_PER_RUN = 10;
+
 /** Boss first (on screen immediately), then its escort trickles in behind it. */
 function buildBossWaveQueue(wave: number, rng: Rng): SpawnEntry[] {
   const escortCount = bossEscortCount(wave);
@@ -27,6 +38,19 @@ export function startWave(world: WorldState, wave: number): void {
   world.spawnTimer = 0;
   world.waveTimer = 0;
   world.phase = 'running';
+
+  if (wave % GEM_WAVE_INTERVAL === 0 && world.gemsCollected < MAX_GEMS_PER_RUN && world.spawnQueue.length > 0) {
+    // Never the boss entry itself — a boss already reads as a big spike via
+    // its charge/scrap multipliers, and killing it is the wave's own event.
+    const nonBossIndices = world.spawnQueue.reduce<number[]>((acc, entry, i) => {
+      if (!entry.isBoss) acc.push(i);
+      return acc;
+    }, []);
+    if (nonBossIndices.length > 0) {
+      const pick = world.rng.pick(nonBossIndices);
+      world.spawnQueue[pick] = { ...world.spawnQueue[pick], dropsGem: true };
+    }
+  }
 }
 
 export function updateSpawns(world: WorldState, dt: number, config: WaveConfig): void {
@@ -55,9 +79,14 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
   // sprite would inherit its 1.6x speed multiplier on top of the boss's own
   // slowdown and end up barely slower than a regular runner.
   const scale = entry.isBoss ? profile.scale * BOSS_PROFILE.scaleMul : profile.scale;
-  const hp = entry.isBoss ? stats.enemyHp : stats.enemyHp * profile.hpMul;
+  const baseHp = entry.isBoss ? stats.enemyHp : stats.enemyHp * profile.hpMul;
   const speed = entry.isBoss ? stats.enemySpeed : stats.enemySpeed * profile.speedMul;
-  const damage = entry.isBoss ? stats.enemyDamage : stats.enemyDamage * profile.dmgMul;
+  const baseDamage = entry.isBoss ? stats.enemyDamage : stats.enemyDamage * profile.dmgMul;
+  // Voltage tier scales enemy threat on top of the wave curve (data/voltages.ts)
+  // — applied here rather than baked into WaveConfig, since the wave config
+  // itself is loadout-agnostic (shared with the headless sim harness).
+  const hp = baseHp * world.loadout.enemyHpMult;
+  const damage = baseDamage * world.loadout.enemyDmgMult;
 
   const enemy: Enemy = {
     id: world.nextEnemyId++,
@@ -79,6 +108,7 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
     chargeReward: stats.chargePerKill,
     attackCooldown: 0,
     inContact: false,
+    dropsGem: entry.dropsGem ?? false,
   };
   world.enemies.push(enemy);
 }

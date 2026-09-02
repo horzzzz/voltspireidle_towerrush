@@ -3,36 +3,44 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { RewardCard, type RewardIcon } from '@/components/daily-reward/reward-card';
+import { RewardCard } from '@/components/daily-reward/reward-card';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { dailyRewardForDay } from '@/game/data/daily';
+import { dayKey, effectiveNow } from '@/game/economy/clock';
+import { useMetaStore } from '@/game/state/meta-store';
 
 const TITLE = require('@/assets/images/daily-reward/title.png');
 const DAY7_BAR = require('@/assets/images/ui/panel-bar.png');
 const CLAIM_BUTTON = require('@/assets/images/ui/pill-button.png');
-const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
-
-const CURRENT_DAY = 1;
-
-const REWARDS: { day: number; amount: string; icon: RewardIcon }[] = [
-  { day: 1, amount: '10', icon: 'gem' },
-  { day: 2, amount: '10', icon: 'gem' },
-  { day: 3, amount: '12', icon: 'utility' },
-  { day: 4, amount: '15', icon: 'gem' },
-  { day: 5, amount: '4', icon: 'chip' },
-  { day: 6, amount: '20', icon: 'gem' },
-];
-const DAY_7_AMOUNT = '40';
 
 const close = () => router.back();
 
-/** Daily reward modal (Figma node 1:72). Claiming is a stub for now. */
+/**
+ * Daily reward modal (Figma node 1:72). Every day pays gems on a rising
+ * curve (data/daily.ts) — the original's day-3 "tool" and day-5 "power
+ * cell" icons map to currencies this game doesn't have, so both cards use
+ * the gem icon too (per user direction). The counter climbs past day 7
+ * rather than looping — day 8+ just keeps paying the day-7 amount.
+ */
 export default function DailyRewardScreen() {
   // `transparentModal` (not `fullScreenModal`) keeps this screen inside the app's
   // view hierarchy so these insets are non-zero; padding is applied explicitly
   // rather than via <SafeAreaView> so the absolutely-positioned close button
   // reliably clears the status bar.
   const insets = useSafeAreaInsets();
+  const daily = useMetaStore((s) => s.daily);
+  const clockHighWater = useMetaStore((s) => s.clockHighWater);
+  const claimDaily = useMetaStore((s) => s.claimDaily);
+
+  const now = effectiveNow(clockHighWater);
+  const today = dayKey(now);
+  const alreadyClaimedToday = daily.lastClaimKey === today;
+  const yesterday = dayKey(now - 24 * 60 * 60 * 1000);
+  const nextDay = alreadyClaimedToday ? daily.day : daily.lastClaimKey === yesterday ? daily.day + 1 : 1;
+  // Which of the 7 visual cards to highlight — the reward itself keeps
+  // climbing past day 7, but the ladder art only has one cycle to show.
+  const cyclePos = ((nextDay - 1) % 7) + 1;
 
   return (
     <View style={styles.container}>
@@ -54,13 +62,25 @@ export default function DailyRewardScreen() {
           showsVerticalScrollIndicator={false}>
           <Image source={TITLE} style={styles.title} contentFit="contain" />
 
-          <Text style={styles.subtitle}>Your day {CURRENT_DAY} reward is ready</Text>
+          <Text style={styles.subtitle}>
+            {alreadyClaimedToday ? 'Come back tomorrow' : `Your day ${nextDay} reward is ready`}
+          </Text>
 
           <View style={styles.grid}>
-            {[REWARDS.slice(0, 3), REWARDS.slice(3, 6)].map((row, i) => (
+            {[
+              [1, 2, 3],
+              [4, 5, 6],
+            ].map((row, i) => (
               <View key={i} style={styles.gridRow}>
-                {row.map((r) => (
-                  <RewardCard key={r.day} day={r.day} amount={r.amount} icon={r.icon} />
+                {row.map((day) => (
+                  <RewardCard
+                    key={day}
+                    day={day}
+                    amount={String(dailyRewardForDay(day))}
+                    icon="gem"
+                    active={day === cyclePos && !alreadyClaimedToday}
+                    past={day < cyclePos || alreadyClaimedToday}
+                  />
                 ))}
               </View>
             ))}
@@ -70,18 +90,25 @@ export default function DailyRewardScreen() {
             <Image source={DAY7_BAR} style={StyleSheet.absoluteFill} contentFit="fill" />
             <View style={[StyleSheet.absoluteFill, styles.day7Content]}>
               <View style={styles.day7Amount}>
-                <Image source={GEM_ICON} style={styles.day7Icon} contentFit="contain" />
-                <Text style={styles.day7AmountText}>+{DAY_7_AMOUNT}</Text>
+                <Image source={require('@/assets/images/menu/icon-gem.png')} style={styles.day7Icon} contentFit="contain" />
+                <Text style={styles.day7AmountText}>+{dailyRewardForDay(7)}</Text>
               </View>
-              <Text style={styles.day7Label}>Day 7</Text>
+              <Text style={styles.day7Label}>Day 7{nextDay > 7 ? '+' : ''}</Text>
             </View>
           </View>
 
           <Pressable
-            onPress={close}
-            style={({ pressed }) => [styles.claim, pressed && styles.claimPressed]}>
+            onPress={() => {
+              if (claimDaily()) close();
+            }}
+            disabled={alreadyClaimedToday}
+            style={({ pressed }) => [
+              styles.claim,
+              alreadyClaimedToday && styles.claimDisabled,
+              pressed && !alreadyClaimedToday && styles.claimPressed,
+            ]}>
             <Image source={CLAIM_BUTTON} style={StyleSheet.absoluteFill} contentFit="fill" />
-            <Text style={styles.claimText}>Claim day {CURRENT_DAY}</Text>
+            <Text style={styles.claimText}>{alreadyClaimedToday ? 'Claimed' : `Claim day ${nextDay}`}</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -173,6 +200,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  claimDisabled: { opacity: 0.5 },
   claimPressed: { transform: [{ scale: 0.96 }] },
   claimText: {
     fontFamily: Fonts.grenzeSemiBold,

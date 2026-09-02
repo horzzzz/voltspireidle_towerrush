@@ -7,6 +7,7 @@ import { StatsPanel } from '@/components/menu/stats-panel';
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
+import { getVoltage, isVoltageUnlocked, VOLTAGES } from '@/game/data/voltages';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const LOGO = require('@/assets/images/splash/logo.png');
@@ -14,6 +15,7 @@ const REACTOR = require('@/assets/images/splash/tower.png');
 const BATTLE_BUTTON = require('@/assets/images/menu/battle-button.png');
 const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
+// TODO(ads): rewarded video grants x2 scrap for 10 minutes. Inert until AdMob is wired up.
 const noop = () => {};
 
 function handleRailPress(key: string) {
@@ -26,7 +28,15 @@ function handleRailPress(key: string) {
 /** Main menu / idle hub (Figma node 1:114). */
 export default function GameScreen() {
   const scrap = useMetaStore((s) => s.scrap);
-  const highestWave = useMetaStore((s) => s.highestWave);
+  const gems = useMetaStore((s) => s.gems);
+  const voltageTier = useMetaStore((s) => s.voltage);
+  const highestWaveByVoltage = useMetaStore((s) => s.highestWaveByVoltage);
+  const bestScrapPerHourByVoltage = useMetaStore((s) => s.bestScrapPerHourByVoltage);
+  const selectVoltage = useMetaStore((s) => s.selectVoltage);
+
+  const voltage = getVoltage(voltageTier);
+  const canPrev = voltageTier > 1;
+  const canNext = voltageTier < VOLTAGES.length && isVoltageUnlocked(voltageTier + 1, highestWaveByVoltage);
 
   return (
     <ScrollView
@@ -35,7 +45,7 @@ export default function GameScreen() {
       showsVerticalScrollIndicator={false}>
       {/* Top cluster: balances, logo, reactor + side rail */}
       <View style={styles.topCluster}>
-        <TopBar scrap={formatNumber(scrap)} onEnergyPress={noop} />
+        <TopBar scrap={formatNumber(scrap)} gems={formatNumber(gems)} onEnergyPress={noop} />
         <Image source={LOGO} style={styles.logo} contentFit="contain" />
         <View style={styles.reactorWrap}>
           <Image source={REACTOR} style={styles.reactor} contentFit="contain" />
@@ -45,11 +55,18 @@ export default function GameScreen() {
         </View>
       </View>
 
-      <StatsPanel onPrev={noop} onNext={noop} highest={formatInt(highestWave)} />
+      <StatsPanel
+        tier={voltage.name}
+        multiplier={`x${voltage.scrapMult}`}
+        scrapPerHour={formatNumber(bestScrapPerHourByVoltage[voltageTier] ?? 0)}
+        highest={formatInt(highestWaveByVoltage[voltageTier] ?? 0)}
+        onPrev={canPrev ? () => selectVoltage(voltageTier - 1) : undefined}
+        onNext={canNext ? () => selectVoltage(voltageTier + 1) : undefined}
+      />
 
       <View style={styles.bonus}>
         <Text style={styles.bonusPrimary} numberOfLines={1} adjustsFontSizeToFit>
-          Scrap bonus in effect x1
+          Scrap bonus in effect x{voltage.scrapMult}
         </Text>
         <View style={styles.bonusRow}>
           <Text style={styles.bonusSecondary} numberOfLines={1} adjustsFontSizeToFit>

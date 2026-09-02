@@ -17,22 +17,29 @@ type UpgradeRowProps = {
   name: string;
   from: string;
   to: string;
-  price: string;
+  /** Omitted (and `PriceTag` hidden) once `maxed` is true. */
+  price?: string;
+  maxed?: boolean;
+  /** True when the player can't afford it right now — dims the row without hiding it. */
+  disabled?: boolean;
   onBuy?: () => void;
 };
 
 /** A single buyable stat upgrade (Figma node 1:420). */
-export function UpgradeRow({ category, name, from, to, price, onBuy }: UpgradeRowProps) {
+export function UpgradeRow({ category, name, from, to, price, maxed, disabled, onBuy }: UpgradeRowProps) {
   return (
-    <Pressable onPress={onBuy} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+    <Pressable
+      onPress={onBuy}
+      disabled={maxed || disabled}
+      style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && !disabled && styles.pressed]}>
       <Image source={ICONS[category]} style={styles.icon} contentFit="contain" />
       <View style={styles.labels}>
         <Text style={styles.name}>{name}</Text>
         <Text style={styles.values}>
-          {from} <Text style={styles.arrow}>→</Text> <Text style={styles.to}>{to}</Text>
+          {from} <Text style={styles.arrow}>→</Text> <Text style={styles.to}>{maxed ? 'MAX' : to}</Text>
         </Text>
       </View>
-      <PriceTag price={price} />
+      {!maxed && price != null && <PriceTag price={price} />}
     </Pressable>
   );
 }
@@ -48,6 +55,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(21,23,34,0.71)',
   },
   pressed: { opacity: 0.7 },
+  rowDisabled: { opacity: 0.5 },
   icon: { width: 22, height: 22 },
   labels: { flex: 1 },
   name: {

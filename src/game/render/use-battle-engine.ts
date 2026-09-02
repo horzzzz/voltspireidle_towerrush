@@ -3,7 +3,7 @@ import { useSharedValue } from 'react-native-reanimated';
 
 import { buyUpgrade as buyUpgradeAction } from '../core/upgrades';
 import { advanceSimulation, createWorld, retireRun, setSpeedMultiplier } from '../core/world';
-import type { UpgradeId } from '../core/types';
+import type { RunLoadout, UpgradeId } from '../core/types';
 import { useBattleStore } from '../state/battle-store';
 import { ENEMY_RENDER_SCALE } from './enemy-atlas';
 import { createEmptyEnemyBuffers, packEnemyBuffers } from './enemy-buffers';
@@ -21,8 +21,11 @@ const MAX_FRAME_DT = 0.25;
  * throttled publish into `battle-store` that everything else (HUD, upgrade
  * bar, overlays) reads from. One instance per battle screen.
  */
-export function useBattleEngine() {
-  const worldRef = useRef(createWorld());
+export function useBattleEngine(loadout: RunLoadout) {
+  // `seed` omitted (not `Date.now()` inline) — the React Compiler flags a
+  // literal impure-function call sitting in the render body; the default
+  // param inside `createWorld` itself isn't visible to that check.
+  const worldRef = useRef(createWorld(undefined, loadout));
   const publish = useBattleStore((s) => s.publish);
 
   const scavengerBuffer = useSharedValue(createEmptyEnemyBuffers().scavenger);
@@ -91,11 +94,11 @@ export function useBattleEngine() {
         publish(worldRef.current);
       },
       restart: () => {
-        worldRef.current = createWorld();
+        worldRef.current = createWorld(Date.now(), loadout);
         publish(worldRef.current);
       },
     }),
-    [publish],
+    [publish, loadout],
   );
 
   return {

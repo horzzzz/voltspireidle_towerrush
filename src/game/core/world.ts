@@ -5,7 +5,7 @@ import { updateMovement } from './systems/movement';
 import { isWaveCleared, startWave, updateSpawns, WAVE_CLEAR_PAUSE } from './systems/spawn';
 import { endRun, updateTowerVitals } from './systems/tower';
 import { Rng } from './rng';
-import type { WorldState } from './types';
+import { defaultRunLoadout, type RunLoadout, type WorldState } from './types';
 
 /** Charge granted at the start of every run, before any wave is cleared. */
 const START_CHARGE = 20;
@@ -15,7 +15,12 @@ export const FIXED_DT = 1 / 60;
 /** Caps how many fixed steps run per `advanceSimulation` call (spiral-of-death guard). */
 const MAX_STEPS_PER_ADVANCE = 10;
 
-export function createWorld(seed = Date.now()): WorldState {
+/**
+ * `loadout` defaults to the original's confirmed starting Spire stats
+ * (RunLoadout's own defaults) — lets the headless sim harness and any test
+ * call this with no meta layer at all.
+ */
+export function createWorld(seed = Date.now(), loadout: RunLoadout = defaultRunLoadout()): WorldState {
   const world: WorldState = {
     rng: new Rng(seed),
     phase: 'running',
@@ -36,10 +41,15 @@ export function createWorld(seed = Date.now()): WorldState {
       health: 0, // set below, once max HP is known
       attackCooldown: 0,
     },
+    loadout,
 
     charge: START_CHARGE,
     scrapEarned: 0,
     killCount: 0,
+    wavesCleared: 0,
+    bossKills: 0,
+    gemsCollected: 0,
+    upgradesBought: 0,
 
     nextEnemyId: 1,
     nextEffectId: 1,
@@ -49,7 +59,7 @@ export function createWorld(seed = Date.now()): WorldState {
     result: null,
   };
 
-  world.tower.health = getTowerMaxHealth(world.tower.levels);
+  world.tower.health = getTowerMaxHealth(world.tower.levels, loadout);
   startWave(world, 1);
   return world;
 }
@@ -72,7 +82,11 @@ export function tickWorld(world: WorldState, dt: number): void {
   pruneCombatState(world);
 
   if (world.phase === 'running' && isWaveCleared(world)) {
-    world.scrapEarned += config.scrapReward * getTowerScrapBonus(world.tower.levels);
+    const { loadout } = world;
+    world.scrapEarned +=
+      (config.scrapReward + loadout.scrapPerWave) * loadout.scrapMult * getTowerScrapBonus(world.tower.levels);
+    world.wavesCleared += 1;
+    if (world.isBossWave) world.bossKills += 1;
     world.phase = 'wave-clear';
     world.waveTimer = WAVE_CLEAR_PAUSE;
   } else if (world.phase === 'wave-clear') {

@@ -1,11 +1,13 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
+import { DAILY_MISSION_REWARD, WEEKLY_LADDER, missionLabel } from '@/game/data/missions';
 import { useMetaStore } from '@/game/state/meta-store';
+import type { MissionInstance } from '@/game/economy/missions';
 
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
@@ -13,45 +15,15 @@ const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
 type Tab = 'daily' | 'weekly';
 
-type Reward = { gems: number; scrap: number };
-
-type DailyMission = { id: string; label: string; current: number; target: number; reward: Reward };
-
-/** Daily missions (Figma node 1:504). Progress is a stub — all start at 0. */
-const DAILY: DailyMission[] = [
-  { id: 'gems8', label: 'Collect 8 floating gems', current: 0, target: 8, reward: { gems: 3, scrap: 20 } },
-  { id: 'coil8', label: 'Buy 8 coilworks', current: 0, target: 8, reward: { gems: 3, scrap: 20 } },
-  { id: 'gems3', label: 'Collect 3 floating gems', current: 0, target: 3, reward: { gems: 3, scrap: 20 } },
-  { id: 'coil3', label: 'Buy 3 coilworks', current: 0, target: 3, reward: { gems: 3, scrap: 20 } },
-  { id: 'boss3', label: 'Kill 3 bosses', current: 0, target: 3, reward: { gems: 3, scrap: 20 } },
-];
-
-/**
- * Weekly completion ladder (Figma node 1:932). The design rewards each tier
- * with gems + a medal + a capacitor; medals and capacitors don't exist in the
- * game, so both are folded into scrap.
- */
-const WEEKLY: { completions: number; reward: Reward }[] = [
-  { completions: 5, reward: { gems: 10, scrap: 40 } },
-  { completions: 10, reward: { gems: 15, scrap: 60 } },
-  { completions: 15, reward: { gems: 20, scrap: 90 } },
-  { completions: 20, reward: { gems: 25, scrap: 120 } },
-  { completions: 25, reward: { gems: 30, scrap: 160 } },
-  { completions: 35, reward: { gems: 40, scrap: 220 } },
-  { completions: 40, reward: { gems: 50, scrap: 300 } },
-];
-
-const WEEKLY_COMPLETIONS = 0;
-
-function RewardChips({ reward, dim }: { reward: Reward; dim?: boolean }) {
+function RewardChips({ gems, scrap, dim }: { gems: number; scrap: number; dim?: boolean }) {
   return (
     <View style={[styles.rewardRow, dim && styles.dim]}>
       <View style={styles.reward}>
-        <Text style={styles.rewardValue}>{reward.gems}</Text>
+        <Text style={styles.rewardValue}>{gems}</Text>
         <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
       </View>
       <View style={styles.reward}>
-        <Text style={styles.rewardValue}>{reward.scrap}</Text>
+        <Text style={styles.rewardValue}>{scrap}</Text>
         <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
       </View>
     </View>
@@ -84,25 +56,26 @@ function MiniButton({
   );
 }
 
-function DailyRow({ mission }: { mission: DailyMission }) {
-  const claimable = mission.current >= mission.target;
+function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () => void }) {
+  const claimable = mission.current >= mission.target && !mission.claimed;
   return (
     <View style={styles.row}>
       <View style={styles.rowMain}>
         <Text style={styles.missionLabel} numberOfLines={1}>
-          {mission.label}{' '}
+          {missionLabel(mission.type, mission.target)}{' '}
           <Text style={styles.progress}>
-            ({mission.current}/{mission.target})
+            ({Math.min(mission.current, mission.target)}/{mission.target})
           </Text>
         </Text>
         <View style={styles.rewardLine}>
           <Text style={styles.rewardLabel}>Reward:</Text>
-          <RewardChips reward={mission.reward} />
+          <RewardChips gems={DAILY_MISSION_REWARD.gems} scrap={DAILY_MISSION_REWARD.scrap} dim={mission.claimed} />
         </View>
       </View>
       <View style={styles.rowButtons}>
-        <MiniButton label="Claim" disabled={!claimable} />
-        <MiniButton label="Reroll" icon={VIDEO_ICON} />
+        <MiniButton label={mission.claimed ? 'Claimed' : 'Claim'} disabled={!claimable} onPress={onClaim} />
+        {/* TODO(ads): rewarded video re-rolls this mission for a new template/target. Inert until ads are wired up. */}
+        <MiniButton label="Reroll" icon={VIDEO_ICON} disabled={mission.claimed} />
       </View>
     </View>
   );
@@ -112,6 +85,14 @@ export default function MissionsScreen() {
   const [tab, setTab] = useState<Tab>('daily');
   const scrap = useMetaStore((s) => s.scrap);
   const gems = useMetaStore((s) => s.gems);
+  const missions = useMetaStore((s) => s.missions);
+  const ensureMissionsForToday = useMetaStore((s) => s.ensureMissionsForToday);
+  const claimMission = useMetaStore((s) => s.claimMission);
+  const claimWeeklyTier = useMetaStore((s) => s.claimWeeklyTier);
+
+  useEffect(() => {
+    ensureMissionsForToday();
+  }, [ensureMissionsForToday]);
 
   return (
     <ScrollView
@@ -132,32 +113,32 @@ export default function MissionsScreen() {
       </View>
 
       {tab === 'daily' ? (
-        <>
-          <Text style={styles.subtitle}>Next mission in 4:09:00</Text>
-          <View style={styles.list}>
-            {DAILY.map((m) => (
-              <DailyRow key={m.id} mission={m} />
-            ))}
-          </View>
-        </>
+        <View style={styles.list}>
+          {missions.list.map((m) => (
+            <DailyRow key={m.id} mission={m} onClaim={() => claimMission(m.id)} />
+          ))}
+        </View>
       ) : (
         <>
-          <Text style={styles.subtitle}>
-            {WEEKLY_COMPLETIONS} completions this week · resets in 92:09:00
-          </Text>
+          <Text style={styles.subtitle}>{missions.weeklyCompletions} completions this week</Text>
           <View style={styles.weeklyPanel}>
-            {WEEKLY.map((tier, i) => {
-              const reached = WEEKLY_COMPLETIONS >= tier.completions;
+            {WEEKLY_LADDER.map((tier, i) => {
+              const claimed = missions.weeklyClaimed.includes(i);
+              const claimable = !claimed && missions.weeklyCompletions >= tier.completions;
               return (
-                <View
+                <Pressable
                   key={tier.completions}
+                  disabled={!claimable}
+                  onPress={() => claimWeeklyTier(i)}
                   style={[styles.weeklyRow, i > 0 && styles.weeklyDivider]}>
-                  <Text style={[styles.weeklyMult, !reached && styles.dim]}>
+                  <Text style={[styles.weeklyMult, !claimable && !claimed && styles.dim]}>
                     {tier.completions}
                     <Text style={styles.weeklyMultX}>x</Text>
                   </Text>
-                  <RewardChips reward={tier.reward} dim={!reached} />
-                </View>
+                  <RewardChips gems={tier.reward.gems} scrap={tier.reward.scrap} dim={!claimable && !claimed} />
+                  {claimable && <Text style={styles.claim}>Claim</Text>}
+                  {claimed && <Text style={styles.claimedText}>Claimed</Text>}
+                </Pressable>
               );
             })}
           </View>
@@ -209,7 +190,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 10,
   },
-  list: { width: '100%', gap: 6 },
+  list: { width: '100%', gap: 6, marginTop: 12 },
   row: {
     width: '100%',
     minHeight: 58,
@@ -309,6 +290,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
+    gap: 10,
   },
   weeklyDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -322,5 +304,17 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   weeklyMultX: { fontSize: 17 },
+  claim: {
+    fontFamily: Fonts.grenzeSemiBold,
+    fontSize: 13,
+    color: MenuColors.accentBright,
+    textTransform: 'uppercase',
+  },
+  claimedText: {
+    fontFamily: Fonts.grenzeSemiBold,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
+  },
   bottomSpace: { height: 28 },
 });

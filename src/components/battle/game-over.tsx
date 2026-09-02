@@ -4,17 +4,18 @@ import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
-import type { RunResult } from '@/game/core/types';
+import type { RunSummary } from '@/game/core/types';
 
 const TITLE = require('@/assets/images/battle/run-over-title.png');
 const PILL = require('@/assets/images/ui/pill-button.png');
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
+const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
 const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
 const noop = () => {};
 
 type GameOverProps = {
-  result: RunResult | null;
+  result: RunSummary | null;
   onRestart: () => void;
   /** The run has already ended here — no confirmation needed, unlike the in-battle settings' "To menu". */
   onExit: () => void;
@@ -61,8 +62,16 @@ export function GameOver({ result, onRestart, onExit }: GameOverProps) {
           <Text style={styles.stat} numberOfLines={1} adjustsFontSizeToFit>
             Scrap earned: <Text style={styles.statValue}>{formatNumber(result.scrapEarned)}</Text>
           </Text>
+          {result.gemsCollected > 0 && (
+            <View style={styles.gemsRow}>
+              <Text style={styles.stat}>Gems: </Text>
+              <Text style={styles.statValue}>{formatInt(result.gemsCollected)}</Text>
+              <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
+            </View>
+          )}
         </View>
 
+        {/* TODO(ads): rewarded video, doubles scrapEarned + gemsCollected before banking. Inert until AdMob is wired up. */}
         <Pressable onPress={noop} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
           <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
           <View style={styles.doubleContent}>
@@ -114,6 +123,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   statValue: { color: BattleColors.chargeAccent },
+  gemsRow: { flexDirection: 'row', alignItems: 'center' },
+  gemIcon: { width: 15, height: 14, marginLeft: 4 },
   pill: {
     width: '78%',
     aspectRatio: 630 / 150,

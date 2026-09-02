@@ -10,8 +10,8 @@ import type { RunEndReason, WorldState } from '../types';
  * later `phase === 'ended'` check here would falsely read as unreachable.
  */
 export function updateTowerVitals(world: WorldState, dt: number): boolean {
-  const maxHealth = getTowerMaxHealth(world.tower.levels);
-  const regen = getTowerRegen(world.tower.levels);
+  const maxHealth = getTowerMaxHealth(world.tower.levels, world.loadout);
+  const regen = getTowerRegen(world.tower.levels, world.loadout);
   world.tower.health = Math.min(maxHealth, world.tower.health + regen * dt);
 
   if (world.tower.health <= 0) {
@@ -26,7 +26,13 @@ export function endRun(world: WorldState, reason: RunEndReason): void {
   world.result = {
     reason,
     waveReached: world.wave,
+    wavesCleared: world.wavesCleared,
     scrapEarned: Math.round(world.scrapEarned),
+    gemsCollected: world.gemsCollected,
+    killCount: world.killCount,
+    bossKills: world.bossKills,
+    upgradesBought: world.upgradesBought,
     timeSurvived: world.time,
+    voltageTier: world.loadout.voltageTier,
   };
 }

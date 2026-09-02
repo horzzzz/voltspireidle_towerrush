@@ -22,18 +22,23 @@ type RewardCardProps = {
   day: number;
   amount: string;
   icon: RewardIcon;
+  /** Today's claimable card — full opacity + accent border. */
+  active?: boolean;
+  /** Already claimed (or cycled past) — dimmed. */
+  past?: boolean;
 };
 
 /** One day's reward tile in the 3x2 grid (Figma node 1:84 etc). */
-export function RewardCard({ day, amount, icon }: RewardCardProps) {
+export function RewardCard({ day, amount, icon, active, past }: RewardCardProps) {
   const { width } = useWindowDimensions();
   const row = Math.min(width, MenuMaxWidth) - SCREEN_PADDING * 2;
   const cardW = (row - GAP * 2) / 3;
   const cardH = cardW / CARD_RATIO;
 
   return (
-    <View style={{ width: cardW, height: cardH }}>
+    <View style={[{ width: cardW, height: cardH }, past && styles.past]}>
       <Image source={CARD_BG} style={StyleSheet.absoluteFill} contentFit="fill" />
+      {active && <View style={styles.activeRing} />}
       <View style={[StyleSheet.absoluteFill, styles.content]}>
         <Image source={ICONS[icon]} style={styles.icon} contentFit="contain" />
         <Text style={styles.day}>Day {day}</Text>
@@ -44,6 +49,13 @@ export function RewardCard({ day, amount, icon }: RewardCardProps) {
 }
 
 const styles = StyleSheet.create({
+  past: { opacity: 0.5 },
+  activeRing: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: MenuColors.accentBright,
+  },
   content: {
     alignItems: 'center',
     justifyContent: 'center',

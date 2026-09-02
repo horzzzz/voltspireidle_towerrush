@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { BattleSettings } from '@/components/battle/battle-settings';
@@ -7,7 +7,8 @@ import { GameOver } from '@/components/battle/game-over';
 import { HudTop } from '@/components/battle/hud-top';
 import { UpgradeBar } from '@/components/battle/upgrade-bar';
 import { MenuColors } from '@/constants/theme';
-import type { RunResult } from '@/game/core/types';
+import type { RunSummary } from '@/game/core/types';
+import { buildRunLoadout } from '@/game/economy/loadout';
 import { useBattleStore } from '@/game/state/battle-store';
 import { useMetaStore } from '@/game/state/meta-store';
 import { BattleCanvas } from '@/game/render/battle-canvas';
@@ -15,25 +16,35 @@ import { useBattleEngine } from '@/game/render/use-battle-engine';
 
 /** Battle screen — the whole "Tap Battle" loop (Figma nodes 1:1512/1:1559). */
 export default function BattleScreen() {
-  const { buffers, actions } = useBattleEngine();
+  // Built once per screen mount from the player's persisted Coilworks levels
+  // and selected Voltage — a run's loadout never changes mid-run even if the
+  // player somehow altered meta state elsewhere (they can't, but this keeps
+  // the sim's own state as the only source of truth once it starts).
+  const coilworks = useMetaStore((s) => s.coilworks);
+  const coilworksUnlocked = useMetaStore((s) => s.coilworksUnlocked);
+  const voltage = useMetaStore((s) => s.voltage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadout is intentionally frozen for the run's lifetime
+  const loadout = useMemo(() => buildRunLoadout(coilworks, voltage, coilworksUnlocked), []);
+
+  const { buffers, actions } = useBattleEngine(loadout);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const result = useBattleStore((s) => s.result);
-  const addRunResult = useMetaStore((s) => s.addRunResult);
+  const bankRun = useMetaStore((s) => s.bankRun);
 
-  // Bank the run's Scrap into the persisted meta total the moment the run
-  // ends — not on "Restart" — so it survives even if the player backs out
-  // of the game-over overlay instead of tapping through it. Shared by the
-  // reactive effect below and handleExitToMenu (which needs the bank to
+  // Bank the run's Scrap/Gems into the persisted meta total the moment the
+  // run ends — not on "Restart" — so it survives even if the player backs
+  // out of the game-over overlay instead of tapping through it. Shared by
+  // the reactive effect below and handleExitToMenu (which needs the bank to
   // have happened *before* it navigates away, not on the next render).
-  const bankedResultRef = useRef<RunResult | null>(null);
+  const bankedResultRef = useRef<RunSummary | null>(null);
   const bankResult = useCallback(
-    (r: RunResult | null) => {
+    (r: RunSummary | null) => {
       if (r && r !== bankedResultRef.current) {
         bankedResultRef.current = r;
-        addRunResult(r);
+        bankRun(r);
       }
     },
-    [addRunResult],
+    [bankRun],
   );
 
   useEffect(() => {

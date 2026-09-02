@@ -1,40 +1,17 @@
 import { Image } from 'expo-image';
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { useMetaStore } from '@/game/state/meta-store';
 import { formatNumber } from '@/game/core/numbers';
+import { MILESTONES, milestoneKey } from '@/game/data/milestones';
+import { getVoltage, isVoltageUnlocked, VOLTAGES } from '@/game/data/voltages';
 
 const ARROW = require('@/assets/images/menu/arrow.png');
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
-
-/**
- * Free milestone track for the current voltage (Figma node 1:1043).
- * The premium column and "premium pass" copy from the design are dropped —
- * there is no IAP in the game — so the single track is drawn larger.
- */
-type Milestone = { wave: number; scrap: number; gems: number };
-
-const VOLTAGES: { name: string; milestones: Milestone[] }[] = [
-  {
-    name: 'Voltage 1',
-    milestones: [
-      { wave: 10, scrap: 2, gems: 1 },
-      { wave: 20, scrap: 3, gems: 1 },
-      { wave: 30, scrap: 4, gems: 2 },
-      { wave: 40, scrap: 5, gems: 2 },
-      { wave: 50, scrap: 6, gems: 3 },
-      { wave: 60, scrap: 8, gems: 3 },
-      { wave: 70, scrap: 10, gems: 4 },
-      { wave: 80, scrap: 12, gems: 4 },
-      { wave: 100, scrap: 15, gems: 5 },
-      { wave: 150, scrap: 20, gems: 6 },
-      { wave: 200, scrap: 30, gems: 10 },
-    ],
-  },
-];
 
 function RewardChip({ icon, amount }: { icon: number; amount: number }) {
   return (
@@ -45,48 +22,66 @@ function RewardChip({ icon, amount }: { icon: number; amount: number }) {
   );
 }
 
+type RowState = 'locked' | 'claimable' | 'claimed';
+
 function MilestoneRow({
-  milestone,
-  reached,
+  wave,
+  scrap,
+  gems,
+  state,
   first,
   last,
+  onClaim,
 }: {
-  milestone: Milestone;
-  reached: boolean;
+  wave: number;
+  scrap: number;
+  gems: number;
+  state: RowState;
   first: boolean;
   last: boolean;
+  onClaim: () => void;
 }) {
+  const reached = state !== 'locked';
   return (
     <View style={styles.row}>
       <Pressable
-        disabled={!reached}
+        disabled={state !== 'claimable'}
+        onPress={onClaim}
         style={({ pressed }) => [
           styles.card,
           reached ? styles.cardReached : styles.cardLocked,
-          pressed && reached && styles.cardPressed,
+          pressed && state === 'claimable' && styles.cardPressed,
         ]}>
-        <RewardChip icon={SCRAP_ICON} amount={milestone.scrap} />
-        <RewardChip icon={GEM_ICON} amount={milestone.gems} />
-        {reached && <Text style={styles.claim}>Claim</Text>}
+        <RewardChip icon={SCRAP_ICON} amount={scrap} />
+        <RewardChip icon={GEM_ICON} amount={gems} />
+        {state === 'claimable' && <Text style={styles.claim}>Claim</Text>}
+        {state === 'claimed' && <Text style={styles.claimed}>Claimed</Text>}
       </Pressable>
 
       <View style={styles.tick}>
         <View style={[styles.rail, first && styles.railTop, last && styles.railBottom]} />
         <View style={[styles.railFill, first && styles.railTop, reached ? undefined : styles.railHidden]} />
         <View style={[styles.node, reached ? styles.nodeReached : styles.nodeLocked]}>
-          <Text style={styles.nodeText}>{milestone.wave}</Text>
+          <Text style={styles.nodeText}>{wave}</Text>
         </View>
       </View>
     </View>
   );
 }
 
+/** Free milestone track (Figma node 1:1043) — no premium column, no IAP in this game. */
 export default function MilestonesScreen() {
-  const highestWave = useMetaStore((s) => s.highestWave);
+  const highestWaveByVoltage = useMetaStore((s) => s.highestWaveByVoltage);
+  const claimedKeys = useMetaStore((s) => s.milestonesClaimed);
   const scrap = useMetaStore((s) => s.scrap);
   const gems = useMetaStore((s) => s.gems);
+  const claimMilestone = useMetaStore((s) => s.claimMilestone);
 
-  const voltage = VOLTAGES[0];
+  const [tier, setTier] = useState(1);
+  const voltage = getVoltage(tier);
+  const highest = highestWaveByVoltage[tier] ?? 0;
+  const canPrev = tier > 1;
+  const canNext = tier < VOLTAGES.length && isVoltageUnlocked(tier + 1, highestWaveByVoltage);
 
   return (
     <ScrollView
@@ -98,27 +93,34 @@ export default function MilestonesScreen() {
       <Text style={styles.title}>Milestones</Text>
 
       <View style={styles.pager}>
-        <Pressable hitSlop={12} disabled>
-          <Image source={ARROW} style={[styles.arrow, styles.arrowDim]} contentFit="contain" />
+        <Pressable hitSlop={12} disabled={!canPrev} onPress={() => setTier((t) => t - 1)}>
+          <Image source={ARROW} style={[styles.arrow, !canPrev && styles.arrowDim]} contentFit="contain" />
         </Pressable>
         <Text style={styles.voltage}>{voltage.name}</Text>
-        <Pressable hitSlop={12} disabled>
-          <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, styles.arrowDim]} contentFit="contain" />
+        <Pressable hitSlop={12} disabled={!canNext} onPress={() => setTier((t) => t + 1)}>
+          <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !canNext && styles.arrowDim]} contentFit="contain" />
         </Pressable>
       </View>
 
       <Text style={styles.trackLabel}>Free</Text>
 
       <View style={styles.list}>
-        {voltage.milestones.map((m, i) => (
-          <MilestoneRow
-            key={m.wave}
-            milestone={m}
-            reached={highestWave >= m.wave}
-            first={i === 0}
-            last={i === voltage.milestones.length - 1}
-          />
-        ))}
+        {MILESTONES.map((m, i) => {
+          const key = milestoneKey(tier, m.wave);
+          const state: RowState = claimedKeys[key] ? 'claimed' : highest >= m.wave ? 'claimable' : 'locked';
+          return (
+            <MilestoneRow
+              key={m.wave}
+              wave={m.wave}
+              scrap={Math.round(m.scrap * voltage.scrapMult)}
+              gems={m.gems}
+              state={state}
+              first={i === 0}
+              last={i === MILESTONES.length - 1}
+              onClaim={() => claimMilestone(tier, m.wave)}
+            />
+          );
+        })}
       </View>
 
       <View style={styles.bottomSpace} />
@@ -220,6 +222,13 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.grenzeSemiBold,
     fontSize: 14,
     color: MenuColors.accentBright,
+    textTransform: 'uppercase',
+  },
+  claimed: {
+    marginLeft: 'auto',
+    fontFamily: Fonts.grenzeSemiBold,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
     textTransform: 'uppercase',
   },
   tick: {

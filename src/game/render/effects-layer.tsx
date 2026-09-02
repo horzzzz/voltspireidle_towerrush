@@ -19,6 +19,13 @@ export function EffectsLayer() {
     () => matchFont({ fontFamily: Platform.OS === 'ios' ? 'Helvetica-Bold' : 'sans-serif', fontSize: 15 }),
     [],
   );
+  // Bigger so a crit reads as a crit even before the player registers the
+  // color — the only in-battle confirmation that Coilworks/Charge Crit
+  // chance is actually doing something (see lazy-hugging-eagle plan, "Догон 1").
+  const critFont = useMemo(
+    () => matchFont({ fontFamily: Platform.OS === 'ios' ? 'Helvetica-Bold' : 'sans-serif', fontSize: 20 }),
+    [],
+  );
 
   return (
     <>
@@ -35,11 +42,11 @@ export function EffectsLayer() {
       {popups.map((popup) => (
         <Text
           key={popup.id}
-          font={font}
-          text={Math.round(popup.amount).toString()}
-          x={popup.x - 10}
+          font={popup.isCrit ? critFont : font}
+          text={Math.round(popup.amount).toString() + (popup.isCrit ? '!' : '')}
+          x={popup.x - (popup.isCrit ? 14 : 10)}
           y={popup.y - 12}
-          color={popup.isBoss ? '#ff5c5c' : '#ffffff'}
+          color={popup.isCrit ? '#ffcf3a' : popup.isBoss ? '#ff5c5c' : '#ffffff'}
         />
       ))}
     </>

@@ -13,6 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { LoadingScreen } from '@/components/splash/loading-screen';
 import { StartScreen } from '@/components/splash/start-screen';
+import { useMetaStore } from '@/game/state/meta-store';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -31,7 +32,13 @@ export default function RootLayout() {
   }, [fontsLoaded]);
 
   const handleLoadingDone = useCallback(() => setPhase('start'), []);
-  const handleStart = useCallback(() => setPhase('app'), []);
+  const handleStart = useCallback(() => {
+    // Rolls today's daily/weekly missions if the calendar day/week has
+    // turned over since the last session — before any screen that reads
+    // them mounts, so Missions never flashes yesterday's list first.
+    useMetaStore.getState().ensureMissionsForToday();
+    setPhase('app');
+  }, []);
 
   if (!fontsLoaded) return null;
 

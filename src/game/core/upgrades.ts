@@ -1,14 +1,21 @@
 import { isUpgradeMaxed, UPGRADE_DEFS, upgradeCost, upgradeValue } from '../data/tower-stats';
 import type { UpgradeId, WorldState } from './types';
 
-export type BuyUpgradeResult = 'bought' | 'maxed' | 'too-expensive';
+export type BuyUpgradeResult = 'bought' | 'maxed' | 'too-expensive' | 'locked';
 
 /**
  * Spends Charge to raise one upgrade a level. Buying Health also tops up
  * current HP by the max-HP delta, so it reads as "gained HP" rather than
  * quietly raising an invisible ceiling.
+ *
+ * Enforced here, not just hidden in the UI (UpgradeBar filters by the same
+ * flag) — a stat gated behind an un-bought Coilworks unlock (Crit chance,
+ * Armor) must not be purchasable in battle even if something calls this
+ * directly, e.g. the headless sim harness's greedy buyer.
  */
 export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
+  if (!world.loadout.runUpgradesUnlocked[id]) return 'locked';
+
   const def = UPGRADE_DEFS[id];
   const level = world.tower.levels[id];
 
@@ -19,9 +26,11 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
 
   world.charge -= cost;
   world.tower.levels[id] = level + 1;
+  world.upgradesBought += 1;
 
   if (id === 'health') {
-    const delta = upgradeValue(def, level + 1) - upgradeValue(def, level);
+    const base = world.loadout.healthBase;
+    const delta = upgradeValue(def, level + 1, base) - upgradeValue(def, level, base);
     world.tower.health += delta;
   }
 
