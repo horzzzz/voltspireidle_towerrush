@@ -44,6 +44,7 @@ export default function RootLayout() {
         {phase === 'app' && (
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="battle" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
             <Stack.Screen
               name="daily-reward"
               options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}

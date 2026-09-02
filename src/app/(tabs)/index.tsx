@@ -6,6 +6,8 @@ import { SideRail } from '@/components/menu/side-rail';
 import { StatsPanel } from '@/components/menu/stats-panel';
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { formatInt, formatNumber } from '@/game/core/numbers';
+import { useMetaStore } from '@/game/state/meta-store';
 
 const LOGO = require('@/assets/images/splash/logo.png');
 const REACTOR = require('@/assets/images/splash/tower.png');
@@ -22,6 +24,9 @@ function handleRailPress(key: string) {
 
 /** Main menu / idle hub (Figma node 1:114). */
 export default function GameScreen() {
+  const scrap = useMetaStore((s) => s.scrap);
+  const highestWave = useMetaStore((s) => s.highestWave);
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -29,7 +34,7 @@ export default function GameScreen() {
       showsVerticalScrollIndicator={false}>
       {/* Top cluster: balances, logo, reactor + side rail */}
       <View style={styles.topCluster}>
-        <TopBar onEnergyPress={noop} />
+        <TopBar scrap={formatNumber(scrap)} onEnergyPress={noop} />
         <Image source={LOGO} style={styles.logo} contentFit="contain" />
         <View style={styles.reactorWrap}>
           <Image source={REACTOR} style={styles.reactor} contentFit="contain" />
@@ -39,7 +44,7 @@ export default function GameScreen() {
         </View>
       </View>
 
-      <StatsPanel onPrev={noop} onNext={noop} />
+      <StatsPanel onPrev={noop} onNext={noop} highest={formatInt(highestWave)} />
 
       <View style={styles.bonus}>
         <Text style={styles.bonusPrimary} numberOfLines={1} adjustsFontSizeToFit>
@@ -58,7 +63,7 @@ export default function GameScreen() {
       <View style={styles.spacer} />
 
       <Pressable
-        onPress={noop}
+        onPress={() => router.push('/battle')}
         style={({ pressed }) => [styles.battle, pressed && styles.battlePressed]}>
         <Image source={BATTLE_BUTTON} style={styles.battleImg} contentFit="contain" />
       </Pressable>
