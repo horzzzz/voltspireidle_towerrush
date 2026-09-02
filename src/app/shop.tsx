@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
+import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { SCRAP_PACKS, SHOP_DAILY_GIFT_GEMS } from '@/game/data/shop';
@@ -43,7 +44,9 @@ function Panel({ children }: { children: ReactNode }) {
 /** Shop (Figma nodes 1:783 "Daily" / 1:803 "Catalog"). */
 export default function ShopScreen() {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>('daily');
+  // The "Daily" tab holds only the rewarded-video gem gift, so it's hidden
+  // until ads are wired up (see ADS_ENABLED).
+  const [tab, setTab] = useState<Tab>(ADS_ENABLED ? 'daily' : 'catalog');
 
   const scrap = useMetaStore((s) => s.scrap);
   const gems = useMetaStore((s) => s.gems);
@@ -64,9 +67,11 @@ export default function ShopScreen() {
         <Text style={styles.title}>Shop</Text>
 
         <View style={styles.tabs}>
-          <Pressable onPress={() => setTab('daily')} hitSlop={8}>
-            <Text style={[styles.tab, tab !== 'daily' && styles.tabInactive]}>Daily</Text>
-          </Pressable>
+          {ADS_ENABLED && (
+            <Pressable onPress={() => setTab('daily')} hitSlop={8}>
+              <Text style={[styles.tab, tab !== 'daily' && styles.tabInactive]}>Daily</Text>
+            </Pressable>
+          )}
           <Pressable onPress={() => setTab('catalog')} hitSlop={8}>
             <Text style={[styles.tab, tab !== 'catalog' && styles.tabInactive]}>Catalog</Text>
           </Pressable>

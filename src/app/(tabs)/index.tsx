@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SideRail } from '@/components/menu/side-rail';
 import { StatsPanel } from '@/components/menu/stats-panel';
 import { TopBar } from '@/components/menu/top-bar';
+import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
 import { getVoltage, isVoltageUnlocked, VOLTAGES } from '@/game/data/voltages';
@@ -68,14 +69,16 @@ export default function GameScreen() {
         <Text style={styles.bonusPrimary} numberOfLines={1} adjustsFontSizeToFit>
           Scrap bonus in effect x{voltage.scrapMult}
         </Text>
-        <View style={styles.bonusRow}>
-          <Text style={styles.bonusSecondary} numberOfLines={1} adjustsFontSizeToFit>
-            x2 scrap bonus for 10 minutes
-          </Text>
-          <Pressable onPress={noop} hitSlop={8}>
-            <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
-          </Pressable>
-        </View>
+        {ADS_ENABLED && (
+          <View style={styles.bonusRow}>
+            <Text style={styles.bonusSecondary} numberOfLines={1} adjustsFontSizeToFit>
+              x2 scrap bonus for 10 minutes
+            </Text>
+            <Pressable onPress={noop} hitSlop={8}>
+              <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
+            </Pressable>
+          </View>
+        )}
       </View>
 
       <View style={styles.spacer} />

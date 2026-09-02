@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-
+import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors } from '@/constants/theme';
 
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
@@ -27,10 +27,11 @@ export function TopBar({ scrap = '0', gems = '0', onEnergyPress }: TopBarProps) 
           <Text style={styles.value}>{gems}</Text>
         </View>
       </View>
-
-      <Pressable onPress={onEnergyPress} hitSlop={8}>
-        <Image source={ENERGY_PILL} style={styles.energy} contentFit="contain" />
-      </Pressable>
+      { ADS_ENABLED &&
+          <Pressable onPress={onEnergyPress} hitSlop={8}>
+            <Image source={ENERGY_PILL} style={styles.energy} contentFit="contain" />
+          </Pressable>
+      }
     </View>
   );
 }

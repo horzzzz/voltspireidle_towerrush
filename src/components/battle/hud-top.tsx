@@ -6,6 +6,7 @@ import { BalanceReadout } from './balance-readout';
 import { SettingsButton } from './settings-button';
 import { SpeedControl } from './speed-control';
 import { WavePanel } from './wave-panel';
+import { ADS_ENABLED } from '@/constants/features';
 import { useBattleStore } from '@/game/state/battle-store';
 import type { SpeedMultiplier } from '@/game/render/use-battle-engine';
 
@@ -40,7 +41,7 @@ export function HudTop({ onSettingsPress, onSetSpeed }: HudTopProps) {
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
       <View style={styles.column}>
-        <AdBonusPill source={BONUS_CHARGE} aspectRatio={57 / 24} onPress={noop} />
+        {ADS_ENABLED && <AdBonusPill source={BONUS_CHARGE} aspectRatio={57 / 24} onPress={noop} />}
         <BalanceReadout icon={CHARGE_ICON} value={charge} iconWidth={12} iconHeight={17} />
         <BalanceReadout icon={SCRAP_ICON} value={scrapEarned} iconWidth={13} iconHeight={16} />
       </View>
@@ -50,7 +51,7 @@ export function HudTop({ onSettingsPress, onSetSpeed }: HudTopProps) {
       <View style={[styles.column, styles.columnRight]}>
         <SpeedControl onSetSpeed={onSetSpeed} />
         <SettingsButton onPress={onSettingsPress} />
-        <AdBonusPill source={BONUS_GEM} aspectRatio={73 / 25} onPress={noop} />
+        {ADS_ENABLED && <AdBonusPill source={BONUS_GEM} aspectRatio={73 / 25} onPress={noop} />}
       </View>
     </View>
   );

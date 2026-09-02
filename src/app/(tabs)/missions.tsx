@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
+import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { DAILY_MISSION_REWARD, WEEKLY_LADDER, missionLabel } from '@/game/data/missions';
@@ -75,7 +76,7 @@ function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () 
       <View style={styles.rowButtons}>
         <MiniButton label={mission.claimed ? 'Claimed' : 'Claim'} disabled={!claimable} onPress={onClaim} />
         {/* TODO(ads): rewarded video re-rolls this mission for a new template/target. Inert until ads are wired up. */}
-        <MiniButton label="Reroll" icon={VIDEO_ICON} disabled={mission.claimed} />
+        {ADS_ENABLED && <MiniButton label="Reroll" icon={VIDEO_ICON} disabled={mission.claimed} />}
       </View>
     </View>
   );

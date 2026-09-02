@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useEffect } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ADS_ENABLED } from '@/constants/features';
 import { BattleColors, Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
 import type { RunSummary } from '@/game/core/types';
@@ -72,14 +73,16 @@ export function GameOver({ result, onRestart, onExit }: GameOverProps) {
         </View>
 
         {/* TODO(ads): rewarded video, doubles scrapEarned + gemsCollected before banking. Inert until AdMob is wired up. */}
-        <Pressable onPress={noop} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
-          <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
-          <View style={styles.doubleContent}>
-            <Text style={styles.doubleText}>x2</Text>
-            <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
-            <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
-          </View>
-        </Pressable>
+        {ADS_ENABLED && (
+          <Pressable onPress={noop} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
+            <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
+            <View style={styles.doubleContent}>
+              <Text style={styles.doubleText}>x2</Text>
+              <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
+              <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
+            </View>
+          </Pressable>
+        )}
 
         <Pressable onPress={onRestart} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
           <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
