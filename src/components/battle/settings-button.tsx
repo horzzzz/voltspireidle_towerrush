@@ -1,8 +1,8 @@
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet } from 'react-native';
 
-const BG = require('@/assets/images/battle/settings-bg.png');
-const GEAR = require('@/assets/images/battle/settings-gear.png');
+const BG = require('@/assets/images/menu/rail-button.png');
+const GEAR = require('@/assets/images/menu/rail-settings.png');
 
 /** Opens the in-battle settings overlay (Figma nodes 1:1525 / 1:1526). */
 export function SettingsButton({ onPress }: { onPress?: () => void }) {
