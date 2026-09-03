@@ -3,6 +3,8 @@ import { StyleSheet } from 'react-native';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 
 import { ARENA_HEIGHT, ARENA_WIDTH, ATTACK_RANGE, TOWER_X, TOWER_Y } from '@/game/data/arena';
+import { getSkin } from '@/game/data/skins';
+import { useMetaStore } from '@/game/state/meta-store';
 import { ADDITIVE_CAP, G, NORMAL_CAP } from '@/game/vfx/layout';
 import { EnemyAtlas } from './enemy-atlas';
 import { TowerHealthRing } from './tower-health-ring';
@@ -10,7 +12,7 @@ import { ParticleLayer } from './vfx/particle-layer';
 import { VfxPicture } from './vfx/vfx-picture';
 
 const BG = require('@/assets/images/battle/bg.png');
-const TOWER = require('@/assets/images/battle/tower.png');
+const STOCK_TOWER = require('@/assets/images/battle/tower.png');
 const TOWER_SIZE = 132; // design px — matches the Figma tower_1 frame (~122×124)
 
 type Props = {
@@ -46,7 +48,8 @@ type Props = {
 export function BattleCanvas({ buffers, vfx }: Props) {
   const { ref, size } = useCanvasSize();
   const bg = useImage(BG);
-  const tower = useImage(TOWER);
+  const skin = useMetaStore((s) => getSkin(s.selectedSkin));
+  const tower = useImage(skin?.image ?? STOCK_TOWER);
   const scale = size.width > 0 ? size.width / ARENA_WIDTH : 0;
 
   // The tower alone carries the firing recoil, on top of whatever the scene

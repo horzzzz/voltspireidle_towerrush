@@ -18,6 +18,7 @@ import {
 import { DAILY_MISSION_COUNT, DAILY_MISSION_REWARD, WEEKLY_LADDER } from '../data/missions';
 import { dailyRewardForDay } from '../data/daily';
 import { MILESTONES, milestoneKey } from '../data/milestones';
+import { DEFAULT_SKIN_ID, isSkinUnlocked, SKINS } from '../data/skins';
 import { getVoltage, isVoltageUnlocked } from '../data/voltages';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, rollWheelIndex, type WheelSector } from '../data/wheel';
 import type { RunSummary } from '../core/types';
@@ -73,6 +74,8 @@ interface MetaState {
   wheel: WheelState;
   /** Clamps Date.now() against clock rollback — see economy/clock.effectiveNow. */
   clockHighWater: number;
+  /** Tower skin worn in battle — see data/skins.ts. Always an unlocked id. */
+  selectedSkin: string;
 
   /** Folds a finished run's earnings into the persisted totals. */
   bankRun: (summary: RunSummary) => void;
@@ -87,6 +90,8 @@ interface MetaState {
   /** Pays out the prize from a spin already consumed by `spinWheel` — called once the wheel visually stops. */
   claimWheelReward: (sector: WheelSector) => void;
   selectVoltage: (tier: number) => boolean;
+  /** Wear an unlocked skin. No-op returning `false` if it is still locked. */
+  selectSkin: (id: string) => boolean;
   /**
    * Spend `gemCost` gems to bank `scrapAmount` scrap (shop catalog).
    * No-op returning `false` when the player can't afford it.
@@ -118,6 +123,7 @@ export const useMetaStore = create<MetaState>()(
       missions: { dayKey: '', list: [], weekKey: '', weeklyCompletions: 0, weeklyClaimed: [] },
       wheel: { lastSpinAt: 0, freeSpins: 0 },
       clockHighWater: 0,
+      selectedSkin: DEFAULT_SKIN_ID,
 
       bankRun: (summary) => {
         const state = get();
@@ -304,6 +310,14 @@ export const useMetaStore = create<MetaState>()(
         return true;
       },
 
+      selectSkin: (id) => {
+        const state = get();
+        const skin = SKINS.find((s) => s.id === id);
+        if (!skin || !isSkinUnlocked(skin, state.highestWaveByVoltage)) return false;
+        set({ selectedSkin: id });
+        return true;
+      },
+
       buyScrap: (gemCost, scrapAmount) => {
         if (get().gems < gemCost) return false;
         set((s) => ({ gems: s.gems - gemCost, scrap: s.scrap + scrapAmount }));
@@ -312,16 +326,22 @@ export const useMetaStore = create<MetaState>()(
     }),
     {
       name: 'voltspire-meta',
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => sqliteStateStorage),
       // v1 only had {scrap, gems, highestWave}. v2 fanned that out per-Voltage
       // and added the rest of the economy. v3 reworked Coilworks to the
       // original's own branch set and its group-based unlocks, so levels and
       // unlock flags can't carry over field-for-field — currencies, wave
-      // records and every other system do.
+      // records and every other system do. v4 added the equipped tower skin.
       migrate: (persisted) => {
         const old = persisted as
-          | { scrap?: number; gems?: number; highestWave?: number; highestWaveByVoltage?: Record<number, number> }
+          | {
+              scrap?: number;
+              gems?: number;
+              highestWave?: number;
+              highestWaveByVoltage?: Record<number, number>;
+              selectedSkin?: string;
+            }
           | undefined;
         return {
           ...(persisted as object),
@@ -331,6 +351,7 @@ export const useMetaStore = create<MetaState>()(
           highestWaveByVoltage: old?.highestWaveByVoltage ?? (old?.highestWave ? { 1: old.highestWave } : {}),
           coilworks: createInitialCoilworksLevels(),
           coilworksUnlocked: createInitialCoilworksUnlocked(),
+          selectedSkin: old?.selectedSkin ?? DEFAULT_SKIN_ID,
         };
       },
     },

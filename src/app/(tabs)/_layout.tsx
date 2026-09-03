@@ -44,7 +44,7 @@ export default function TabsLayout() {
         <TabTrigger name="chips" href="/chips" />
         <TabTrigger name="milestones" href="/milestones" />
         <TabTrigger name="missions" href="/missions" />
-        <TabTrigger name="relics" href="/relics" />
+        <TabTrigger name="skins" href="/skins" />
       </TabList>
     </Tabs>
   );

@@ -16,7 +16,7 @@ const ITEMS: NavItem[] = [
   { name: 'chips', icon: require('@/assets/images/menu/nav-chips.png') },
   { name: 'milestones', icon: require('@/assets/images/menu/nav-milestones.png') },
   { name: 'missions', icon: require('@/assets/images/menu/nav-missions.png') },
-  { name: 'relics', icon: require('@/assets/images/menu/nav-relics.png') },
+  { name: 'skins', icon: require('@/assets/images/menu/nav-skins.png') },
 ];
 
 const ICON_SIZE = 30;
