@@ -1,67 +1,101 @@
 import { ENEMY_BASE_RADIUS, raySpawnPoint } from '../../data/arena';
-import { buildWaveComposition, ENEMY_PROFILES, pickBossKind, BOSS_PROFILE } from '../../data/enemies';
-import { bossEscortCount, getBaseWaveConfig, getWaveConfig, isBossWave, type WaveConfig } from '../../data/waves';
+import { NORMAL_MAX_ON_SCREEN, WAVE_COOLDOWN_DURATION, WAVE_SPAWN_PHASE_DURATION } from '../../data/balance';
+import { BOSS_PROFILE, buildWaveComposition, ENEMY_PROFILES, pickBossKind } from '../../data/enemies';
+import { getWaveConfig, type WaveConfig } from '../../data/waves';
+import { scrapRewardForKill } from '../formulas';
 import type { Enemy, SpawnEntry, WorldState } from '../types';
 import type { Rng } from '../rng';
 
-/** Seconds between individual spawns within a wave — a drip, not a burst. */
-export const SPAWN_INTERVAL = 0.55;
-/** Pause after a wave is fully cleared, before the next one starts. */
-export const WAVE_CLEAR_PAUSE = 1.5;
-
 /**
  * No dedicated gem-carrier enemy type (per user direction) — instead, one
- * random enemy in the spawn queue is flagged every GEM_WAVE_INTERVAL waves,
+ * random enemy in the wave's batch is flagged every GEM_WAVE_INTERVAL waves,
  * visually identical to its kind, and drops a gem on death. Capped per run
  * so it can't be farmed by grinding low waves forever (the original caps
- * its own gem-carriers for the same reason — see voltspire-original-teardown
- * memory's "Носители выплат").
+ * its own gem-carriers for the same reason).
  */
 export const GEM_WAVE_INTERVAL = 3;
 export const MAX_GEMS_PER_RUN = 10;
 
-/** Boss first (on screen immediately), then its escort trickles in behind it. */
-function buildBossWaveQueue(wave: number, rng: Rng): SpawnEntry[] {
-  const escortCount = bossEscortCount(wave);
-  const escorts = buildWaveComposition(escortCount, wave, rng).map((kind) => ({ kind, isBoss: false }));
-  return [{ kind: pickBossKind(wave), isBoss: true }, ...escorts];
+/** Boss first, so it is on screen and soaking while its escort trickles in behind. */
+function buildWaveQueue(config: WaveConfig, rng: Rng): SpawnEntry[] {
+  const regularCount = config.isBoss ? config.spawnCount - 1 : config.spawnCount;
+  const escorts = buildWaveComposition(regularCount, config.wave, rng).map((kind) => ({ kind, isBoss: false }));
+  return config.isBoss ? [{ kind: pickBossKind(config.wave), isBoss: true }, ...escorts] : escorts;
 }
 
+/**
+ * Starts a wave's clock and queues its enemies. Anything still queued from
+ * the previous wave stays queued in front of them — the wave clock never
+ * waits for the spawner, and the spawner never drops what the on-screen cap
+ * held back.
+ */
 export function startWave(world: WorldState, wave: number): void {
-  const config = getWaveConfig(wave);
-  world.wave = wave;
-  world.isBossWave = config.isBoss;
-  world.bossPending = config.isBoss;
-  world.spawnQueue = config.isBoss
-    ? buildBossWaveQueue(wave, world.rng)
-    : buildWaveComposition(config.enemyCount, wave, world.rng).map((kind) => ({ kind, isBoss: false }));
-  world.spawnTimer = 0;
-  world.waveTimer = 0;
-  world.phase = 'running';
+  const config = getWaveConfig(wave, world.loadout.voltageTier);
+  const batch = buildWaveQueue(config, world.rng);
 
-  if (wave % GEM_WAVE_INTERVAL === 0 && world.gemsCollected < MAX_GEMS_PER_RUN && world.spawnQueue.length > 0) {
+  if (wave % GEM_WAVE_INTERVAL === 0 && world.gemsCollected < MAX_GEMS_PER_RUN) {
     // Never the boss entry itself — a boss already reads as a big spike via
     // its charge/scrap multipliers, and killing it is the wave's own event.
-    const nonBossIndices = world.spawnQueue.reduce<number[]>((acc, entry, i) => {
+    const nonBossIndices = batch.reduce<number[]>((acc, entry, i) => {
       if (!entry.isBoss) acc.push(i);
       return acc;
     }, []);
     if (nonBossIndices.length > 0) {
       const pick = world.rng.pick(nonBossIndices);
-      world.spawnQueue[pick] = { ...world.spawnQueue[pick], dropsGem: true };
+      batch[pick] = { ...batch[pick], dropsGem: true };
     }
   }
+
+  world.wave = wave;
+  world.isBossWave = config.isBoss;
+  world.bossPending = config.isBoss;
+  world.wavePhase = 'spawning';
+  world.phaseTimeLeft = WAVE_SPAWN_PHASE_DURATION;
+  world.spawnQueue.push(...batch);
+  world.waveSpawnTotal = batch.length;
+  world.spawnTimer = 0;
 }
 
+/** Entries of the *current* wave still waiting to spawn — the HUD bar's numerator. */
+export function waveEnemiesLeftToSpawn(world: WorldState): number {
+  return Math.min(world.spawnQueue.length, world.waveSpawnTotal);
+}
+
+/**
+ * Drains the spawn queue. The interval spreads the current wave's batch over
+ * the whole spawn phase; when the on-screen cap is hit the queue simply
+ * waits, which is also what makes the wave bar fall back to spawn progress
+ * (see `formulas.waveProgressFraction`).
+ */
 export function updateSpawns(world: WorldState, dt: number, config: WaveConfig): void {
   if (world.spawnQueue.length === 0) return;
+  if (world.enemies.length >= NORMAL_MAX_ON_SCREEN) return;
+
   world.spawnTimer -= dt;
   if (world.spawnTimer > 0) return;
 
   const entry = world.spawnQueue.shift()!;
   if (entry.isBoss) world.bossPending = false;
   spawnEnemy(world, entry, config);
-  world.spawnTimer = SPAWN_INTERVAL;
+  world.spawnTimer = WAVE_SPAWN_PHASE_DURATION / Math.max(1, config.spawnCount);
+}
+
+/**
+ * Advances the wave clock. Returns true when a full spawn+cooldown cycle just
+ * finished, which is the moment the original pays out Charge/Wave and
+ * Scrap/Wave (`wave_cycle_completed`) — `tickWorld` owns that payout so every
+ * economy change stays in one place.
+ */
+export function updateWaveClock(world: WorldState, dt: number): boolean {
+  world.phaseTimeLeft -= dt;
+  if (world.phaseTimeLeft > 0) return false;
+
+  if (world.wavePhase === 'spawning') {
+    world.wavePhase = 'cooldown';
+    world.phaseTimeLeft = WAVE_COOLDOWN_DURATION;
+    return false;
+  }
+  return true;
 }
 
 function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): void {
@@ -69,24 +103,16 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
   const angle = world.rng.range(0, Math.PI * 2);
   const { x, y } = raySpawnPoint(angle);
 
-  // Escorts on a boss wave use the wave's regular stats, never the boss's
-  // own inflated `config` — only the boss entry itself gets BOSS_PROFILE.
-  const stats = entry.isBoss ? config : getBaseWaveConfig(config.wave);
   // A boss's threat is the same no matter which sprite cycles in for it —
-  // only its on-screen scale borrows from the kind profile (spider/beetle/
-  // worm read as differently sized boss silhouettes); hp/speed/damage come
-  // from BOSS_PROFILE alone. Without this, a boss wearing the runner's
-  // sprite would inherit its 1.6x speed multiplier on top of the boss's own
-  // slowdown and end up barely slower than a regular runner.
+  // only its on-screen scale borrows from the kind profile; hp/speed/damage
+  // come from the wave's boss stats alone. Without this, a boss wearing the
+  // runner's sprite would inherit its 2x speed on top of the boss slowdown
+  // and stop reading as slow.
+  const stats = entry.isBoss ? config.boss! : config.regular;
   const scale = entry.isBoss ? profile.scale * BOSS_PROFILE.scaleMul : profile.scale;
-  const baseHp = entry.isBoss ? stats.enemyHp : stats.enemyHp * profile.hpMul;
-  const speed = entry.isBoss ? stats.enemySpeed : stats.enemySpeed * profile.speedMul;
-  const baseDamage = entry.isBoss ? stats.enemyDamage : stats.enemyDamage * profile.dmgMul;
-  // Voltage tier scales enemy threat on top of the wave curve (data/voltages.ts)
-  // — applied here rather than baked into WaveConfig, since the wave config
-  // itself is loadout-agnostic (shared with the headless sim harness).
-  const hp = baseHp * world.loadout.enemyHpMult;
-  const damage = baseDamage * world.loadout.enemyDmgMult;
+  const hp = entry.isBoss ? stats.hp : stats.hp * profile.hpMul;
+  const speed = entry.isBoss ? stats.speed : stats.speed * profile.speedMul;
+  const damage = entry.isBoss ? stats.damage : stats.damage * profile.dmgMul;
 
   const enemy: Enemy = {
     id: world.nextEnemyId++,
@@ -105,28 +131,11 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
     contactDamage: damage,
     radius: ENEMY_BASE_RADIUS * scale,
     scale,
-    chargeReward: stats.chargePerKill,
+    chargeReward: stats.chargeReward,
+    scrapReward: scrapRewardForKill(profile.scrap, entry.isBoss, config.wave),
     attackCooldown: 0,
     inContact: false,
     dropsGem: entry.dropsGem ?? false,
   };
   world.enemies.push(enemy);
-}
-
-/**
- * The only place that decides a wave is over. Regular waves: every spawn
- * dequeued and every enemy dead. Boss waves: the boss specifically is dead
- * (dequeued and gone from `enemies`) — leftover escort mobs, queued or
- * alive, don't hold the wave open; they idle through the clear pause and
- * carry into the next wave instead of being discarded.
- */
-export function isWaveCleared(world: WorldState): boolean {
-  if (world.isBossWave) {
-    return !world.bossPending && !world.enemies.some((e) => e.isBoss);
-  }
-  return world.spawnQueue.length === 0 && world.enemies.length === 0;
-}
-
-export function isBossWaveNumber(wave: number): boolean {
-  return isBossWave(wave);
 }

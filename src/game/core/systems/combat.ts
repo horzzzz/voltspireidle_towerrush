@@ -1,20 +1,17 @@
 import { ATTACK_RANGE, TOWER_X, TOWER_Y } from '../../data/arena';
+import { ENEMY_ATTACK_INTERVAL } from '../../data/balance';
 import {
-  CRIT_MULTIPLIER,
   getTowerArmor,
   getTowerAttackSpeed,
   getTowerChargeBonus,
   getTowerCritChance,
+  getTowerCritMultiplier,
   getTowerDamage,
   getTowerDeflection,
+  getTowerScrapBonus,
 } from '../../data/tower-stats';
+import { towerIncomingDamage } from '../formulas';
 import type { Enemy, WorldState } from '../types';
-
-/** Even at the deflection cap (75%) and full armor, a contact hit still does at least this much. */
-const MIN_CONTACT_DAMAGE_FRACTION = 0.05;
-
-/** Enemies hit the tower once per second while in contact. */
-const CONTACT_HIT_INTERVAL = 1;
 
 function findNearestTarget(world: WorldState): Enemy | null {
   let best: Enemy | null = null;
@@ -75,10 +72,18 @@ function spawnDamagePopup(
   });
 }
 
+/**
+ * Per-kill income. Charge takes the Coilworks Charge Bonus; Scrap takes both
+ * the Voltage multiplier and the Coilworks Scrap/Kill Bonus — the flat
+ * per-wave payouts in `world.payWaveCycle` deliberately take neither, matching
+ * the original.
+ */
 function killEnemy(world: WorldState, enemy: Enemy): void {
-  const chargeBonus = getTowerChargeBonus(world.loadout);
-  world.charge += enemy.chargeReward * (1 + chargeBonus);
+  const { loadout } = world;
+  world.charge += enemy.chargeReward * (1 + getTowerChargeBonus(loadout));
+  world.scrapEarned += enemy.scrapReward * loadout.scrapMult * (1 + getTowerScrapBonus(loadout));
   world.killCount += 1;
+  if (enemy.isBoss) world.bossKills += 1;
   if (enemy.dropsGem) world.gemsCollected += 1;
   enemy.hp = 0;
 }
@@ -98,8 +103,8 @@ export function updateTowerAttack(world: WorldState, dt: number): void {
   if (!target) return;
 
   const baseDamage = getTowerDamage(world.tower.levels, world.loadout);
-  const isCrit = world.rng.next() < getTowerCritChance(world.loadout, world.tower.levels);
-  const damage = isCrit ? baseDamage * CRIT_MULTIPLIER : baseDamage;
+  const isCrit = world.rng.next() < getTowerCritChance(world.tower.levels, world.loadout);
+  const damage = isCrit ? baseDamage * getTowerCritMultiplier(world.tower.levels, world.loadout) : baseDamage;
   applyDamage(world, target, damage, isCrit);
   spawnBolt(world, target.x, target.y);
 
@@ -107,21 +112,17 @@ export function updateTowerAttack(world: WorldState, dt: number): void {
   world.tower.attackCooldown = 1 / attackSpeed;
 }
 
-/** Enemies standing at the tower chip away its HP — reduced by flat Armor, then by Deflection%. */
+/** Enemies standing at the tower chip away its HP — see `towerIncomingDamage`. */
 export function updateContactDamage(world: WorldState, dt: number): void {
-  const armor = getTowerArmor(world.loadout, world.tower.levels);
+  const armor = getTowerArmor(world.tower.levels, world.loadout);
   const deflection = getTowerDeflection(world.tower.levels, world.loadout);
   for (const enemy of world.enemies) {
     if (!enemy.inContact || enemy.hp <= 0) continue;
     enemy.attackCooldown -= dt;
     if (enemy.attackCooldown > 0) continue;
 
-    const afterArmor = Math.max(
-      enemy.contactDamage * MIN_CONTACT_DAMAGE_FRACTION,
-      enemy.contactDamage - armor,
-    );
-    world.tower.health -= afterArmor * (1 - deflection);
-    enemy.attackCooldown = CONTACT_HIT_INTERVAL;
+    world.tower.health -= towerIncomingDamage(enemy.contactDamage, armor, deflection);
+    enemy.attackCooldown = ENEMY_ATTACK_INTERVAL;
   }
 }
 

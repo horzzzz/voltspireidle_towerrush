@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 
-import { getTowerMaxHealth } from '../data/tower-stats';
-import { getWaveConfig } from '../data/waves';
+import { WAVE_COOLDOWN_DURATION, WAVE_SPAWN_PHASE_DURATION } from '../data/balance';
+import { createInitialUpgradeLevels, getTowerMaxHealth } from '../data/tower-stats';
+import { waveProgressFraction } from '../core/formulas';
+import { waveEnemiesLeftToSpawn } from '../core/systems/spawn';
 import { defaultRunLoadout } from '../core/types';
 import type { BattlePhase, BoltEffect, DamagePopup, RunLoadout, RunSummary, UpgradeId, WorldState } from '../core/types';
 
@@ -16,10 +18,14 @@ export interface BattleSnapshot {
   phase: BattlePhase;
   wave: number;
   isBossWave: boolean;
-  /** Enemies this wave will spawn in total — for the wave panel's progress bar. */
-  waveEnemiesTotal: number;
-  /** Not yet killed: still queued to spawn, or alive on the field. */
-  waveEnemiesRemaining: number;
+  /**
+   * 0..1 across the wave's spawn + cooldown clock — the wave panel's bar on a
+   * normal wave. Waves advance on this timer, not on kills, so the bar tracks
+   * the clock (see `formulas.waveProgressFraction`).
+   */
+  waveProgress: number;
+  /** Alive on the field right now — survivors of earlier waves included. */
+  enemiesAlive: number;
   /**
    * 1 = boss at full HP, 0 = boss dead or not spawned yet. On a boss wave the
    * wave panel shows this (inverted) instead of the generic kill count, so
@@ -49,24 +55,15 @@ const INITIAL: BattleSnapshot = {
   phase: 'running',
   wave: 1,
   isBossWave: false,
-  waveEnemiesTotal: 0,
-  waveEnemiesRemaining: 0,
+  waveProgress: 0,
+  enemiesAlive: 0,
   bossHpFraction: 1,
   charge: 0,
   scrapEarned: 0,
   killCount: 0,
   towerHealth: 0,
   towerMaxHealth: 0,
-  upgradeLevels: {
-    damage: 0,
-    attackSpeed: 0,
-    critChance: 0,
-    health: 0,
-    regen: 0,
-    deflection: 0,
-    armor: 0,
-    scrapBonus: 0,
-  },
+  upgradeLevels: createInitialUpgradeLevels(),
   loadout: defaultRunLoadout(),
   speedMultiplier: 1,
   result: null,
@@ -77,15 +74,28 @@ const INITIAL: BattleSnapshot = {
 export const useBattleStore = create<BattleStore>((set) => ({
   ...INITIAL,
   publish: (world) => {
-    const boss = world.enemies.find((e) => e.isBoss);
+    // Bosses can outlive their own wave now that waves run on a clock, so the
+    // bar must follow the newest one (highest id) rather than a straggler
+    // still walking in from ten waves ago.
+    const boss = world.enemies.reduce<(typeof world.enemies)[number] | undefined>(
+      (newest, e) => (e.isBoss && (newest == null || e.id > newest.id) ? e : newest),
+      undefined,
+    );
     const bossHpFraction = boss ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : world.bossPending ? 1 : 0;
 
     set({
       phase: world.phase,
       wave: world.wave,
       isBossWave: world.isBossWave,
-      waveEnemiesTotal: getWaveConfig(world.wave).enemyCount,
-      waveEnemiesRemaining: world.spawnQueue.length + world.enemies.length,
+      waveProgress: waveProgressFraction(
+        world.wavePhase === 'spawning',
+        world.phaseTimeLeft,
+        WAVE_SPAWN_PHASE_DURATION,
+        WAVE_COOLDOWN_DURATION,
+        world.waveSpawnTotal,
+        waveEnemiesLeftToSpawn(world),
+      ),
+      enemiesAlive: world.enemies.length,
       bossHpFraction,
       charge: world.charge,
       scrapEarned: world.scrapEarned,

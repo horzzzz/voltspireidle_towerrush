@@ -2,25 +2,30 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SectionHeader } from '@/components/upgrades/section-header';
 import { UnlockPanel } from '@/components/upgrades/unlock-panel';
-import { UpgradeRow, type UpgradeCategory } from '@/components/upgrades/upgrade-row';
+import { UpgradeRow } from '@/components/upgrades/upgrade-row';
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
-import { formatNumber } from '@/game/core/numbers';
+import { formatNumber, formatStatValue } from '@/game/core/numbers';
 import {
   COILWORKS_DEFS,
   COILWORKS_ORDER,
   coilworksCost,
+  coilworksUnlocksInCategory,
   coilworksValue,
+  isCoilworksAvailable,
   isCoilworksMaxed,
+  type CoilworksCategory,
   type CoilworksUpgradeId,
 } from '@/game/data/coilworks';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const noop = () => {};
 
-function formatStat(unit: string, value: number): string {
-  return formatNumber(value, unit === '%' ? 1 : 2) + unit;
-}
+const SECTION_TITLES: Record<CoilworksCategory, string> = {
+  attack: 'Attack upgrades',
+  defense: 'Defense upgrades',
+  utility: 'Utility upgrades',
+};
 
 /** Coilworks — the permanent, Scrap-funded upgrade tree (Figma node 1:399). */
 export default function UpgradesScreen() {
@@ -31,20 +36,8 @@ export default function UpgradesScreen() {
   const buyCoilworks = useMetaStore((s) => s.buyCoilworks);
   const unlockCoilworks = useMetaStore((s) => s.unlockCoilworks);
 
-  function renderRow(id: CoilworksUpgradeId, category: UpgradeCategory) {
+  function renderRow(id: CoilworksUpgradeId, category: CoilworksCategory) {
     const def = COILWORKS_DEFS[id];
-
-    if (!unlocked[id]) {
-      return (
-        <UnlockPanel
-          key={id}
-          label={`Unlock ${def.label.toLowerCase()} upgrades`}
-          price={formatNumber(def.unlockCost ?? 0, 0)}
-          onPress={() => unlockCoilworks(id)}
-        />
-      );
-    }
-
     const level = levels[id];
     const maxed = isCoilworksMaxed(def, level);
     const cost = maxed ? null : coilworksCost(def, level);
@@ -55,8 +48,8 @@ export default function UpgradesScreen() {
         key={id}
         category={category}
         name={def.label}
-        from={formatStat(def.unit, coilworksValue(def, level))}
-        to={maxed ? '' : formatStat(def.unit, coilworksValue(def, level + 1))}
+        from={formatStatValue(def.display, coilworksValue(def, level))}
+        to={maxed ? '' : formatStatValue(def.display, coilworksValue(def, level + 1))}
         price={cost != null ? formatNumber(cost, 0) : undefined}
         maxed={maxed}
         disabled={!maxed && !affordable}
@@ -65,9 +58,33 @@ export default function UpgradesScreen() {
     );
   }
 
-  const attackIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'attack');
-  const defenseIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'defense');
-  const utilityIds = COILWORKS_ORDER.filter((id) => COILWORKS_DEFS[id].category === 'utility');
+  /**
+   * A category shows the branches it has unlocked, then one panel per unlock
+   * still to buy. One unlock can cover several branches at once (Defense opens
+   * Health, Regen and Deflection together), which is why the panels come from
+   * `coilworksUnlocksInCategory` rather than from the rows.
+   */
+  function renderSection(category: CoilworksCategory) {
+    const ids = COILWORKS_ORDER.filter(
+      (id) => COILWORKS_DEFS[id].category === category && isCoilworksAvailable(COILWORKS_DEFS[id], unlocked),
+    );
+    const pending = coilworksUnlocksInCategory(category).filter((u) => !unlocked[u.id]);
+
+    return (
+      <View key={category}>
+        <SectionHeader title={SECTION_TITLES[category]} />
+        {ids.map((id) => renderRow(id, category))}
+        {pending.map((unlock) => (
+          <UnlockPanel
+            key={unlock.id}
+            label={unlock.label}
+            price={formatNumber(unlock.cost, 0)}
+            onPress={() => unlockCoilworks(unlock.id)}
+          />
+        ))}
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -78,14 +95,7 @@ export default function UpgradesScreen() {
 
       <Text style={styles.title}>Coilworks</Text>
 
-      <SectionHeader title="Attack upgrades" />
-      {attackIds.map((id) => renderRow(id, 'attack'))}
-
-      <SectionHeader title="Defense upgrades" />
-      {defenseIds.map((id) => renderRow(id, 'defense'))}
-
-      <SectionHeader title="Utility upgrades" />
-      {utilityIds.map((id) => renderRow(id, 'utility'))}
+      {(['attack', 'defense', 'utility'] as CoilworksCategory[]).map(renderSection)}
 
       <View style={styles.bottomSpace} />
     </ScrollView>

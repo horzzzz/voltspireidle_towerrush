@@ -46,7 +46,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "sim": "tsx scripts/battle-sim.ts"
+    "sim": "tsx scripts/battle-sim.ts",
+    "balance": "tsx scripts/balance-check.ts"
   },
   "private": true
 }

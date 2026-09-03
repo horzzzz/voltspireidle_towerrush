@@ -6,10 +6,13 @@ import { dayKey, effectiveNow, weekKey } from '../economy/clock';
 import { applyRunToMissions, incrementMissionProgress, rollDailyMissions, type MissionInstance } from '../economy/missions';
 import {
   COILWORKS_DEFS,
+  COILWORKS_UNLOCKS,
   coilworksCost,
   createInitialCoilworksLevels,
   createInitialCoilworksUnlocked,
+  isCoilworksAvailable,
   isCoilworksMaxed,
+  type CoilworksUnlockId,
   type CoilworksUpgradeId,
 } from '../data/coilworks';
 import { DAILY_MISSION_COUNT, DAILY_MISSION_REWARD, WEEKLY_LADDER } from '../data/missions';
@@ -62,7 +65,7 @@ interface MetaState {
   /** Best scrap/hour seen on a finished run, per tier — hub "Scrap/hr" stat only, no offline income. */
   bestScrapPerHourByVoltage: Record<number, number>;
   coilworks: Record<CoilworksUpgradeId, number>;
-  coilworksUnlocked: Record<CoilworksUpgradeId, boolean>;
+  coilworksUnlocked: Record<CoilworksUnlockId, boolean>;
   /** Claimed milestone keys, "<tier>:<wave>" — see data/milestones.milestoneKey. */
   milestonesClaimed: Record<string, true>;
   daily: DailyRewardState;
@@ -74,7 +77,7 @@ interface MetaState {
   /** Folds a finished run's earnings into the persisted totals. */
   bankRun: (summary: RunSummary) => void;
   buyCoilworks: (id: CoilworksUpgradeId) => boolean;
-  unlockCoilworks: (id: CoilworksUpgradeId) => boolean;
+  unlockCoilworks: (id: CoilworksUnlockId) => boolean;
   claimMilestone: (tier: number, wave: number) => boolean;
   ensureMissionsForToday: () => void;
   claimMission: (id: string) => boolean;
@@ -138,8 +141,8 @@ export const useMetaStore = create<MetaState>()(
 
       buyCoilworks: (id) => {
         const state = get();
-        if (!state.coilworksUnlocked[id]) return false;
         const def = COILWORKS_DEFS[id];
+        if (!isCoilworksAvailable(def, state.coilworksUnlocked)) return false;
         const level = state.coilworks[id];
         if (isCoilworksMaxed(def, level)) return false;
         const cost = coilworksCost(def, level);
@@ -152,12 +155,15 @@ export const useMetaStore = create<MetaState>()(
         return true;
       },
 
+      // One unlock can reveal several branches at once — "Unlock defense
+      // upgrades" opens Health, Regen and Deflection together, which is why
+      // this is keyed by unlock id rather than by branch.
       unlockCoilworks: (id) => {
         const state = get();
-        const def = COILWORKS_DEFS[id];
-        if (state.coilworksUnlocked[id] || def.unlockCost == null) return false;
-        if (state.scrap < def.unlockCost) return false;
-        set((s) => ({ scrap: s.scrap - def.unlockCost!, coilworksUnlocked: { ...s.coilworksUnlocked, [id]: true } }));
+        const unlock = COILWORKS_UNLOCKS[id];
+        if (!unlock || state.coilworksUnlocked[id]) return false;
+        if (state.scrap < unlock.cost) return false;
+        set((s) => ({ scrap: s.scrap - unlock.cost, coilworksUnlocked: { ...s.coilworksUnlocked, [id]: true } }));
         return true;
       },
 
@@ -288,25 +294,25 @@ export const useMetaStore = create<MetaState>()(
     }),
     {
       name: 'voltspire-meta',
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => sqliteStateStorage),
-      // v1 only had {scrap, gems, highestWave}. v2 fans that single number out
-      // per-Voltage and adds every other economy system introduced here.
+      // v1 only had {scrap, gems, highestWave}. v2 fanned that out per-Voltage
+      // and added the rest of the economy. v3 reworked Coilworks to the
+      // original's own branch set and its group-based unlocks, so levels and
+      // unlock flags can't carry over field-for-field — currencies, wave
+      // records and every other system do.
       migrate: (persisted) => {
-        const old = persisted as { scrap?: number; gems?: number; highestWave?: number } | undefined;
+        const old = persisted as
+          | { scrap?: number; gems?: number; highestWave?: number; highestWaveByVoltage?: Record<number, number> }
+          | undefined;
         return {
+          ...(persisted as object),
           scrap: old?.scrap ?? 0,
           gems: old?.gems ?? 0,
           voltage: 1,
-          highestWaveByVoltage: old?.highestWave ? { 1: old.highestWave } : {},
-          bestScrapPerHourByVoltage: {},
+          highestWaveByVoltage: old?.highestWaveByVoltage ?? (old?.highestWave ? { 1: old.highestWave } : {}),
           coilworks: createInitialCoilworksLevels(),
           coilworksUnlocked: createInitialCoilworksUnlocked(),
-          milestonesClaimed: {},
-          daily: { day: 1, lastClaimKey: null },
-          missions: { dayKey: '', list: [], weekKey: '', weeklyCompletions: 0, weeklyClaimed: [] },
-          wheel: { lastSpinAt: 0, freeSpins: 0 },
-          clockHighWater: 0,
         };
       },
     },

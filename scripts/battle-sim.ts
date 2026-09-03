@@ -6,6 +6,7 @@
  *   npm run sim                       -- Voltage 1, no Coilworks
  *   npm run sim -- --voltage=2        -- Voltage 2 multipliers, no Coilworks
  *   npm run sim -- --coilworks=20     -- every Coilworks branch at level 20
+ *   npm run sim -- --waves=200        -- run further than the default 50
  *
  * Strategy modeled: spend Charge greedily on whichever affordable upgrade is
  * cheapest, every time enough Charge is banked. Not optimal play, just a
@@ -16,10 +17,14 @@ import { UPGRADE_ORDER, getTowerAttackSpeed, getTowerDamage, getTowerMaxHealth }
 import { buyUpgrade } from '../src/game/core/upgrades';
 import { createWorld, FIXED_DT, tickWorld } from '../src/game/core/world';
 import { buildRunLoadout } from '../src/game/economy/loadout';
-import { COILWORKS_ORDER, createInitialCoilworksLevels } from '../src/game/data/coilworks';
-import type { CoilworksUpgradeId } from '../src/game/data/coilworks';
+import {
+  COILWORKS_ORDER,
+  COILWORKS_UNLOCKS,
+  createInitialCoilworksLevels,
+  createInitialCoilworksUnlocked,
+} from '../src/game/data/coilworks';
+import type { CoilworksUnlockId, CoilworksUpgradeId } from '../src/game/data/coilworks';
 
-const MAX_WAVE = 50;
 const SEED = 1;
 
 function argValue(name: string): string | null {
@@ -30,20 +35,25 @@ function argValue(name: string): string | null {
 function run(): void {
   const voltageTier = Number(argValue('voltage') ?? '1');
   const coilworksLevel = Number(argValue('coilworks') ?? '0');
+  const maxWave = Number(argValue('waves') ?? '80');
 
   const coilworksLevels = createInitialCoilworksLevels();
+  const unlocked = createInitialCoilworksUnlocked();
   if (coilworksLevel > 0) {
+    // A Coilworks level only means anything once its branch is unlocked, so a
+    // "level N everywhere" run buys every unlock too.
     for (const id of COILWORKS_ORDER) coilworksLevels[id as CoilworksUpgradeId] = coilworksLevel;
+    for (const id of Object.keys(COILWORKS_UNLOCKS) as CoilworksUnlockId[]) unlocked[id] = true;
   }
-  const loadout = buildRunLoadout(coilworksLevels, voltageTier);
+  const loadout = buildRunLoadout(coilworksLevels, voltageTier, unlocked);
 
   const world = createWorld(SEED, loadout);
   let lastWave = 0;
 
   console.log(`Voltage ${voltageTier}, Coilworks level ${coilworksLevel}\n`);
-  console.log('wave  time(s)  hp/max        dmg    atk/s  charge  scrap   kills  gems  scrap/hr');
+  console.log('wave  time(s)  hp/max        dmg    atk/s  charge  scrap   kills alive  scrap/hr');
 
-  while (world.wave <= MAX_WAVE && world.phase !== 'ended') {
+  while (world.wave <= maxWave && world.phase !== 'ended') {
     tickWorld(world, FIXED_DT);
 
     // Greedy spend: try every upgrade in order, buy the first affordable one,
@@ -73,7 +83,7 @@ function run(): void {
           world.charge.toFixed(1).padStart(7),
           world.scrapEarned.toFixed(1).padStart(7),
           String(world.killCount).padStart(7),
-          String(world.gemsCollected).padStart(5),
+          String(world.enemies.length).padStart(5),
           scrapPerHour.toFixed(0).padStart(9),
         ].join(' '),
       );

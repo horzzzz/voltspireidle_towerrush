@@ -1,14 +1,17 @@
-import { createInitialUpgradeLevels, getTowerMaxHealth, getTowerScrapBonus } from '../data/tower-stats';
+import { STARTING_CHARGE, WAVE_SPAWN_PHASE_DURATION } from '../data/balance';
+import {
+  createInitialUpgradeLevels,
+  getChargePerWave,
+  getScrapPerWave,
+  getTowerMaxHealth,
+} from '../data/tower-stats';
 import { getWaveConfig } from '../data/waves';
 import { updateContactDamage, updateTowerAttack, pruneCombatState } from './systems/combat';
 import { updateMovement } from './systems/movement';
-import { isWaveCleared, startWave, updateSpawns, WAVE_CLEAR_PAUSE } from './systems/spawn';
+import { startWave, updateSpawns, updateWaveClock } from './systems/spawn';
 import { endRun, updateTowerVitals } from './systems/tower';
 import { Rng } from './rng';
 import { defaultRunLoadout, type RunLoadout, type WorldState } from './types';
-
-/** Charge granted at the start of every run, before any wave is cleared. */
-const START_CHARGE = 20;
 
 /** Simulation step, seconds. Combat timers key off this, not frame time. */
 export const FIXED_DT = 1 / 60;
@@ -30,10 +33,12 @@ export function createWorld(seed = Date.now(), loadout: RunLoadout = defaultRunL
 
     wave: 1,
     isBossWave: false,
+    wavePhase: 'spawning',
+    phaseTimeLeft: WAVE_SPAWN_PHASE_DURATION,
     spawnQueue: [],
+    waveSpawnTotal: 0,
     spawnTimer: 0,
     bossPending: false,
-    waveTimer: 0,
 
     enemies: [],
     tower: {
@@ -43,7 +48,7 @@ export function createWorld(seed = Date.now(), loadout: RunLoadout = defaultRunL
     },
     loadout,
 
-    charge: START_CHARGE,
+    charge: STARTING_CHARGE,
     scrapEarned: 0,
     killCount: 0,
     wavesCleared: 0,
@@ -69,30 +74,41 @@ export function tickWorld(world: WorldState, dt: number): void {
   if (world.phase === 'ended') return;
 
   world.time += dt;
-  const config = getWaveConfig(world.wave);
+  const config = getWaveConfig(world.wave, world.loadout.voltageTier);
 
-  if (world.phase === 'running') {
-    updateSpawns(world, dt, config);
-    updateMovement(world, dt);
-    updateTowerAttack(world, dt);
-    updateContactDamage(world, dt);
-    if (updateTowerVitals(world, dt)) endRun(world, 'defeated');
+  updateSpawns(world, dt, config);
+  updateMovement(world, dt);
+  updateTowerAttack(world, dt);
+  updateContactDamage(world, dt);
+  if (updateTowerVitals(world, dt)) {
+    endRun(world, 'defeated');
+    return;
   }
 
   pruneCombatState(world);
 
-  if (world.phase === 'running' && isWaveCleared(world)) {
-    const { loadout } = world;
-    world.scrapEarned +=
-      (config.scrapReward + loadout.scrapPerWave) * loadout.scrapMult * getTowerScrapBonus(world.tower.levels);
+  // The wave clock runs regardless of what is still alive — see WavePhase.
+  if (updateWaveClock(world, dt)) {
+    payWaveCycle(world);
     world.wavesCleared += 1;
-    if (world.isBossWave) world.bossKills += 1;
-    world.phase = 'wave-clear';
-    world.waveTimer = WAVE_CLEAR_PAUSE;
-  } else if (world.phase === 'wave-clear') {
-    world.waveTimer -= dt;
-    if (world.waveTimer <= 0) startWave(world, world.wave + 1);
+    startWave(world, world.wave + 1);
   }
+}
+
+/**
+ * The original's `wave_cycle_completed` payout: flat Charge/Wave and
+ * Scrap/Wave, each the sum of its Coilworks branch and its in-run branch.
+ * Neither is touched by the Voltage or bonus multipliers — those apply only
+ * to per-kill income (see `killEnemy` in systems/combat.ts).
+ */
+function payWaveCycle(world: WorldState): void {
+  const { loadout, tower } = world;
+
+  const charge = getChargePerWave(tower.levels, loadout);
+  if (charge > 0) world.charge += charge;
+
+  const scrap = getScrapPerWave(tower.levels, loadout);
+  if (scrap > 0) world.scrapEarned += scrap;
 }
 
 /**

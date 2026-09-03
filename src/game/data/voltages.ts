@@ -1,13 +1,17 @@
 /**
- * Difficulty tiers. The original ships 21 (see voltspire-original-teardown
- * memory); this port ships 3 for now — each one unlocks by reaching wave 100
- * on the previous tier, same as the original's own Voltage-2 gate. Extending
- * the array later is the whole story: nothing else hardcodes a tier count.
+ * Difficulty tiers. The original ships 21; this port ships 3, but the
+ * multipliers are its own ladders (`voltage_hp_ladder_steps`,
+ * `voltage_scrap_ladder_steps`, `voltage_dmg_mult_base`) evaluated by
+ * `core/formulas.ts`, so extending the list later needs no new numbers —
+ * only more entries.
  */
+
+import { voltageDmgMultiplier, voltageHpMultiplier, voltageScrapMultiplier } from '../core/formulas';
+
 export interface VoltageDef {
   tier: number;
   name: string;
-  /** Multiplies every scrap reward (wave clear + milestones) earned on this tier. */
+  /** Multiplies every scrap reward (kills, wave payouts, milestones) on this tier. */
   scrapMult: number;
   /** Multiplies enemy HP on this tier, on top of the wave curve. */
   enemyHpMult: number;
@@ -17,11 +21,21 @@ export interface VoltageDef {
   unlockAtPrevWave: number;
 }
 
-export const VOLTAGES: VoltageDef[] = [
-  { tier: 1, name: 'Voltage 1', scrapMult: 1, enemyHpMult: 1, enemyDmgMult: 1, unlockAtPrevWave: 0 },
-  { tier: 2, name: 'Voltage 2', scrapMult: 6, enemyHpMult: 10, enemyDmgMult: 3, unlockAtPrevWave: 100 },
-  { tier: 3, name: 'Voltage 3', scrapMult: 36, enemyHpMult: 100, enemyDmgMult: 9, unlockAtPrevWave: 100 },
-];
+const TIER_COUNT = 3;
+/** Wave 100 on the previous tier, the same gate the original puts on Voltage 2. */
+const UNLOCK_WAVE = 100;
+
+export const VOLTAGES: VoltageDef[] = Array.from({ length: TIER_COUNT }, (_, i) => {
+  const tier = i + 1;
+  return {
+    tier,
+    name: `Voltage ${tier}`,
+    scrapMult: voltageScrapMultiplier(tier),
+    enemyHpMult: voltageHpMultiplier(tier),
+    enemyDmgMult: voltageDmgMultiplier(tier),
+    unlockAtPrevWave: tier === 1 ? 0 : UNLOCK_WAVE,
+  };
+});
 
 export function getVoltage(tier: number): VoltageDef {
   return VOLTAGES.find((v) => v.tier === tier) ?? VOLTAGES[0];

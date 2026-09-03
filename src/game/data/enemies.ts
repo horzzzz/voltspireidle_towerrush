@@ -1,33 +1,70 @@
+import { ENEMY_TYPE_FAST_MIN_WAVE, ENEMY_TYPE_TANK_MIN_WAVE } from './balance';
+import { enemyTypeShare } from '../core/formulas';
 import type { Rng } from '../core/rng';
 import type { EnemyKind } from '../core/types';
 
 /**
- * Three visual sprites, three distinct roles (per user direction, not
- * cosmetic-only):
- *  - scavenger (enemy-01, spider) — balanced, the wave's baseline.
- *  - hulk (enemy-02, armored beetle) — tanky and slow.
- *  - runner (enemy-03, worm) — fragile and fast.
- * `spriteAspect` (height/width) lets the renderer size the Atlas rect from
- * the source PNG without hardcoding pixel dimensions per kind.
+ * Three sprites, three roles — and now the original's own stats behind them
+ * (`resources/enemies/*.tres`, Voltspire 1.9.0):
+ *  - `scavenger` (enemy-01, spider) = their `basic`: the wave's baseline.
+ *  - `runner` (enemy-03, worm) = their `fast`: double speed, and — note —
+ *    *no* HP penalty; it is simply quicker to reach the Spire.
+ *  - `hulk` (enemy-02, beetle) = their `tank`: 5x HP at half speed.
+ *
+ * `scrap` is the type's `base_scrap`; the wave-depth and income-normalising
+ * factors are layered on in `formulas.scrapRewardForKill`.
+ *
+ * `scale`/`spriteAspect` are art, not balance — they stay ours so the sprites
+ * read correctly at our arena size.
  */
 export interface EnemyProfile {
   kind: EnemyKind;
   hpMul: number;
   speedMul: number;
   dmgMul: number;
+  scrap: number;
   scale: number;
   spriteAspect: number;
+  /** Wave this type starts appearing on; 0 = from the first wave. */
+  minWave: number;
 }
 
 export const ENEMY_PROFILES: Record<EnemyKind, EnemyProfile> = {
-  scavenger: { kind: 'scavenger', hpMul: 1.0, speedMul: 1.0, dmgMul: 1.0, scale: 1.0, spriteAspect: 533 / 444 },
-  hulk: { kind: 'hulk', hpMul: 2.4, speedMul: 0.6, dmgMul: 1.0, scale: 1.15, spriteAspect: 480 / 319 },
-  runner: { kind: 'runner', hpMul: 0.55, speedMul: 1.6, dmgMul: 1.0, scale: 0.85, spriteAspect: 506 / 277 },
+  scavenger: {
+    kind: 'scavenger',
+    hpMul: 1.0,
+    speedMul: 1.0,
+    dmgMul: 1.0,
+    scrap: 1,
+    scale: 1.0,
+    spriteAspect: 533 / 444,
+    minWave: 0,
+  },
+  runner: {
+    kind: 'runner',
+    hpMul: 1.0,
+    speedMul: 2.0,
+    dmgMul: 1.0,
+    scrap: 2,
+    scale: 0.85,
+    spriteAspect: 506 / 277,
+    minWave: ENEMY_TYPE_FAST_MIN_WAVE,
+  },
+  hulk: {
+    kind: 'hulk',
+    hpMul: 5.0,
+    speedMul: 0.5,
+    dmgMul: 1.0,
+    scrap: 4,
+    scale: 1.15,
+    spriteAspect: 480 / 319,
+    minWave: ENEMY_TYPE_TANK_MIN_WAVE,
+  },
 };
 
 /**
- * A boss's hp/speed/damage come from BOSS_HP_MULT etc. in `data/waves.ts` —
- * flat numbers, not a per-kind profile, so a boss threatens the same
+ * A boss's hp/speed/damage come from the BOSS_* constants in `data/balance.ts`
+ * — flat numbers, not a per-kind profile, so a boss threatens the same
  * regardless of which sprite it's wearing. `scaleMul` is the one thing that
  * *does* layer on top of the kind's own visual scale, purely cosmetic.
  */
@@ -45,17 +82,16 @@ export function pickBossKind(wave: number): EnemyKind {
 }
 
 /**
- * Composition ramps in gradually so each type reads before the mix gets
- * busy: waves 1-4 are spider-only, runners join at 5, hulks at 8, then the
- * spider share eases from 60% down to 40% over waves 8-28.
+ * Shares follow the original's `enemy_type_share`: each special type ramps
+ * from 0 to 30% of the wave over 20 waves once its own minimum wave is
+ * reached, and the baseline scavenger takes whatever is left. So waves 1-2
+ * are pure spiders, worms creep in from wave 3, beetles from wave 5, and by
+ * wave 25 the mix has settled at roughly 40/30/30.
  */
 function weightsForWave(wave: number): Record<EnemyKind, number> {
-  if (wave <= 4) return { scavenger: 1, runner: 0, hulk: 0 };
-  if (wave <= 7) return { scavenger: 0.75, runner: 0.25, hulk: 0 };
-  const t = Math.min(1, (wave - 8) / 20);
-  const scavenger = 0.6 - 0.2 * t;
-  const remainder = 1 - scavenger;
-  return { scavenger, runner: remainder / 2, hulk: remainder / 2 };
+  const runner = enemyTypeShare(wave, ENEMY_PROFILES.runner.minWave);
+  const hulk = enemyTypeShare(wave, ENEMY_PROFILES.hulk.minWave);
+  return { scavenger: Math.max(0, 1 - runner - hulk), runner, hulk };
 }
 
 export function pickEnemyKind(wave: number, rng: Rng): EnemyKind {

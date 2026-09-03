@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
-import { formatNumber } from '@/game/core/numbers';
+import { formatNumber, formatStatValue } from '@/game/core/numbers';
 import { isUpgradeMaxed, loadoutBaseFor, upgradeCost, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
 import type { RunLoadout } from '@/game/core/types';
 
@@ -13,15 +13,16 @@ const ICONS: Record<UpgradeDef['icon'], number> = {
   regen: require('@/assets/images/battle/up-regen.png'),
   shield: require('@/assets/images/battle/up-shield.png'),
   scrap: require('@/assets/images/battle/up-scrap.png'),
-  // No dedicated battle-icon art for these two — reuse the Coilworks
-  // category icons (same PNGs the Attack/Defense section headers use there).
+  // No dedicated battle-icon art for these — reuse the Coilworks category
+  // icons (the same PNGs the Attack/Defense section headers use there) and
+  // the HUD's own Charge icon.
   crit: require('@/assets/images/ui/icon-attack.png'),
   armor: require('@/assets/images/ui/icon-defense.png'),
+  charge: require('@/assets/images/battle/icon-charge.png'),
 };
 
 function formatStat(def: UpgradeDef, level: number, base: number | undefined): string {
-  const value = upgradeValue(def, level, base);
-  return formatNumber(value, def.unit === '%' ? 1 : 2) + def.unit;
+  return formatStatValue(def.display, upgradeValue(def, level, base));
 }
 
 type UpgradeRowProps = {

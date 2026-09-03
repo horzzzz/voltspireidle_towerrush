@@ -1,127 +1,190 @@
+/**
+ * In-run upgrades bought with Charge, ported 1:1 from the original's
+ * `resources/battle_upgrades/*.tres` (Voltspire 1.9.0). They burn with the
+ * run; the permanent counterparts live in `data/coilworks.ts`.
+ *
+ * The original ships 49 of these `.tres` files but its `GameState` only
+ * tracks 20 upgrade levels — the rest are forward-looking data for mechanics
+ * that aren't wired up in 1.9.0 (orbs, mines, bounce, multishot, lifesteal,
+ * interest, …). Of those 20, the ten below are the ones this port's engine
+ * can express today; the others need a Barrier, Repair Cells, enemy armor,
+ * super-crits or an upgradeable Range (this port's radius is fixed — see
+ * `data/arena.ts`).
+ *
+ * Two things carry over from the source and matter a lot:
+ *  - Prices grow much faster here than in Coilworks (Damage 1.17/level vs
+ *    1.057). That gap is the brake that ends a run: damage rises 15% per
+ *    purchase while its price rises 17%.
+ *  - Attack Speed, Crit Chance, Crit Multiplier and Deflection are additive;
+ *    only Damage/Health/Regen/Armor multiply.
+ */
+
+import {
+  TOWER_BASE_ARMOR,
+  TOWER_BASE_ATTACK_SPEED,
+  TOWER_BASE_CRIT_CHANCE,
+  TOWER_BASE_CRIT_MULTIPLIER,
+  TOWER_BASE_DAMAGE,
+  TOWER_BASE_DEFLECTION,
+  TOWER_BASE_HP,
+  REGEN_UPGRADE_BASE_VALUE,
+} from './balance';
+import { geometricCost } from '../core/formulas';
+import type { CoilworksDisplay } from './coilworks';
 import type { RunLoadout, UpgradeId } from '../core/types';
 
 export type UpgradeMode = 'multiplicative' | 'additive';
-export type UpgradeIconKey = 'damage' | 'speed' | 'health' | 'regen' | 'shield' | 'scrap' | 'crit' | 'armor';
+export type UpgradeCategory = 'attack' | 'defense' | 'utility';
+export type UpgradeIconKey =
+  | 'damage'
+  | 'speed'
+  | 'health'
+  | 'regen'
+  | 'shield'
+  | 'scrap'
+  | 'crit'
+  | 'armor'
+  | 'charge';
 
 export interface UpgradeDef {
   id: UpgradeId;
   label: string;
+  category: UpgradeCategory;
   icon: UpgradeIconKey;
   mode: UpgradeMode;
-  /** Value at level 0. */
+  /** Value at level 0, when no Coilworks loadout overrides it. */
   base: number;
-  /** Growth factor per level (multiplicative) or flat increment (additive). */
+  /** `effect_per_level`: a factor when multiplicative, an increment when additive. */
   step: number;
-  /** Charge cost to go from level 0 to level 1. */
   baseCost: number;
+  /** `growth` — Charge price multiplier per level. */
   costGrowth: number;
-  /** Hard cap — the "главная жалоба на оригинал" was uncapped upgrades. */
-  maxLevel: number;
-  unit: '' | '/s' | '%';
+  /** Only Attack Speed has one in the original. */
+  maxLevel?: number;
+  display: CoilworksDisplay;
 }
 
-/**
- * Starting values and cost curve are anchored to the original's confirmed
- * Coilworks numbers (see voltspire-original-teardown memory) — these are
- * in-run Charge upgrades, not permanent ones, so growth is looser and caps
- * exist purely to keep a single run finite.
- */
 export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   damage: {
     id: 'damage',
     label: 'Damage',
+    category: 'attack',
     icon: 'damage',
     mode: 'multiplicative',
-    base: 14,
+    base: TOWER_BASE_DAMAGE,
     step: 1.15,
     baseCost: 5,
-    costGrowth: 1.07,
-    maxLevel: 60,
-    unit: '',
+    costGrowth: 1.17,
+    display: 'number',
   },
   attackSpeed: {
     id: 'attackSpeed',
     label: 'Attack speed',
+    category: 'attack',
     icon: 'speed',
-    mode: 'multiplicative',
-    base: 1.0,
-    step: 1.04,
+    mode: 'additive',
+    base: TOWER_BASE_ATTACK_SPEED,
+    step: 0.04,
     baseCost: 7.5,
-    costGrowth: 1.08,
-    maxLevel: 40,
-    unit: '/s',
+    costGrowth: 1.12,
+    maxLevel: 99,
+    display: 'rate',
   },
   critChance: {
     id: 'critChance',
     label: 'Critical chance',
+    category: 'attack',
     icon: 'crit',
     mode: 'additive',
-    base: 0,
-    step: 1,
-    baseCost: 15,
-    costGrowth: 1.09,
-    maxLevel: 20, // +20% crit chance for the run, on top of Coilworks' own
-    unit: '%',
+    base: TOWER_BASE_CRIT_CHANCE,
+    step: 0.05,
+    baseCost: 40,
+    costGrowth: 1.2,
+    display: 'percent',
+  },
+  critMultiplier: {
+    id: 'critMultiplier',
+    label: 'Crit multiplier',
+    category: 'attack',
+    icon: 'crit',
+    mode: 'additive',
+    base: TOWER_BASE_CRIT_MULTIPLIER,
+    step: 0.01,
+    baseCost: 60,
+    costGrowth: 1.12,
+    display: 'multiplier',
   },
   health: {
     id: 'health',
     label: 'Health',
+    category: 'defense',
     icon: 'health',
     mode: 'multiplicative',
-    base: 6,
+    base: TOWER_BASE_HP,
     step: 1.15,
     baseCost: 5,
-    costGrowth: 1.07,
-    maxLevel: 60,
-    unit: '',
+    costGrowth: 1.17,
+    display: 'number',
   },
   regen: {
     id: 'regen',
     label: 'Health regen',
+    category: 'defense',
     icon: 'regen',
     mode: 'multiplicative',
-    base: 0.2,
+    base: REGEN_UPGRADE_BASE_VALUE,
     step: 1.15,
     baseCost: 15,
     costGrowth: 1.09,
-    maxLevel: 40,
-    unit: '/s',
-  },
-  deflection: {
-    id: 'deflection',
-    label: 'Deflection',
-    icon: 'shield',
-    mode: 'additive',
-    base: 0,
-    step: 0.5,
-    baseCost: 10,
-    costGrowth: 1.1,
-    maxLevel: 100, // 100 * 0.5% = 50% cap
-    unit: '%',
+    display: 'rate',
   },
   armor: {
     id: 'armor',
     label: 'Armor',
+    category: 'defense',
     icon: 'armor',
+    mode: 'multiplicative',
+    base: TOWER_BASE_ARMOR,
+    step: 1.00272,
+    baseCost: 30,
+    costGrowth: 1.08,
+    display: 'number',
+  },
+  deflection: {
+    id: 'deflection',
+    label: 'Deflection',
+    category: 'defense',
+    icon: 'shield',
+    mode: 'additive',
+    base: TOWER_BASE_DEFLECTION,
+    step: 0.005,
+    baseCost: 100,
+    costGrowth: 1.14,
+    display: 'fractionPercent',
+  },
+  chargePerWave: {
+    id: 'chargePerWave',
+    label: 'Charge/wave',
+    category: 'utility',
+    icon: 'charge',
     mode: 'additive',
     base: 0,
-    step: 0.5,
-    baseCost: 15,
-    costGrowth: 1.09,
-    maxLevel: 40, // +20 flat armor for the run, on top of Coilworks' own
-    unit: '',
+    step: 4,
+    baseCost: 100,
+    costGrowth: 1.12,
+    display: 'number',
   },
-  scrapBonus: {
-    id: 'scrapBonus',
-    label: 'Scrap bonus',
+  scrapPerWave: {
+    id: 'scrapPerWave',
+    label: 'Scrap/wave',
+    category: 'utility',
     icon: 'scrap',
     mode: 'additive',
     base: 0,
-    step: 5,
-    baseCost: 20,
+    step: 1,
+    baseCost: 100,
     costGrowth: 1.12,
-    maxLevel: 40, // 40 * 5% = 200% cap
-    unit: '%',
+    display: 'number',
   },
 };
 
@@ -129,19 +192,20 @@ export const UPGRADE_ORDER: UpgradeId[] = [
   'damage',
   'attackSpeed',
   'critChance',
+  'critMultiplier',
   'health',
   'regen',
-  'deflection',
   'armor',
-  'scrapBonus',
+  'deflection',
+  'chargePerWave',
+  'scrapPerWave',
 ];
 
 /**
  * `baseOverride` replaces `def.base` when given — this is how a run's
  * Coilworks-derived loadout (economy/loadout.ts) feeds in as the level-0
- * value for damage/attackSpeed/health/regen, while callers with no loadout
- * (the headless sim harness, upgrade-row previews before a run starts) fall
- * back to the def's own default.
+ * value, while callers with no loadout (the headless sim harness, upgrade-row
+ * previews before a run starts) fall back to the def's own default.
  */
 export function upgradeValue(def: UpgradeDef, level: number, baseOverride?: number): number {
   const base = baseOverride ?? def.base;
@@ -150,11 +214,11 @@ export function upgradeValue(def: UpgradeDef, level: number, baseOverride?: numb
 
 /** Charge cost of the *next* purchase, going from `level` to `level + 1`. */
 export function upgradeCost(def: UpgradeDef, level: number): number {
-  return def.baseCost * Math.pow(def.costGrowth, level);
+  return geometricCost(def.baseCost, def.costGrowth, level);
 }
 
 export function isUpgradeMaxed(def: UpgradeDef, level: number): boolean {
-  return level >= def.maxLevel;
+  return def.maxLevel != null && level >= def.maxLevel;
 }
 
 export function createInitialUpgradeLevels(): Record<UpgradeId, number> {
@@ -162,20 +226,22 @@ export function createInitialUpgradeLevels(): Record<UpgradeId, number> {
     damage: 0,
     attackSpeed: 0,
     critChance: 0,
+    critMultiplier: 0,
     health: 0,
     regen: 0,
-    deflection: 0,
     armor: 0,
-    scrapBonus: 0,
+    deflection: 0,
+    chargePerWave: 0,
+    scrapPerWave: 0,
   };
 }
 
 /**
  * The loadout field (if any) that overrides `def.base` for a given in-run
- * upgrade — only the four stats Coilworks also raises permanently
- * (damage/attackSpeed/health/regen) have one; deflection and scrapBonus
- * start fresh every run. Used by UpgradeRow (battle HUD) to preview the
- * real current→next values instead of the def's hardcoded defaults.
+ * upgrade. Every stat the Spire actually carries has a Coilworks counterpart,
+ * so the in-run branch stacks on top of the permanent one; the two flat
+ * income branches (charge/scrap per wave) start from 0 each run because their
+ * Coilworks halves are paid separately at the end of each wave.
  */
 export function loadoutBaseFor(id: UpgradeId, loadout?: RunLoadout): number | undefined {
   if (!loadout) return undefined;
@@ -188,6 +254,14 @@ export function loadoutBaseFor(id: UpgradeId, loadout?: RunLoadout): number | un
       return loadout.healthBase;
     case 'regen':
       return loadout.regenBase;
+    case 'armor':
+      return loadout.armorBase;
+    case 'deflection':
+      return loadout.deflectionBase;
+    case 'critChance':
+      return loadout.critChanceBase;
+    case 'critMultiplier':
+      return loadout.critMultiplierBase;
     default:
       return undefined;
   }
@@ -198,49 +272,62 @@ export function loadoutBaseFor(id: UpgradeId, loadout?: RunLoadout): number | un
 // and any UI preview before a run starts can still call these with the def's
 // own defaults — see `upgradeValue`'s `baseOverride`.
 
+function statValue(id: UpgradeId, levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return upgradeValue(UPGRADE_DEFS[id], levels[id], loadoutBaseFor(id, loadout));
+}
+
 export function getTowerDamage(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  return upgradeValue(UPGRADE_DEFS.damage, levels.damage, loadout?.damageBase);
+  return statValue('damage', levels, loadout);
 }
 
 export function getTowerAttackSpeed(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  return upgradeValue(UPGRADE_DEFS.attackSpeed, levels.attackSpeed, loadout?.attackSpeedBase);
+  return statValue('attackSpeed', levels, loadout);
 }
 
 export function getTowerMaxHealth(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  return upgradeValue(UPGRADE_DEFS.health, levels.health, loadout?.healthBase);
+  return statValue('health', levels, loadout);
 }
 
 export function getTowerRegen(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  return upgradeValue(UPGRADE_DEFS.regen, levels.regen, loadout?.regenBase);
+  return statValue('regen', levels, loadout);
 }
 
-/** Fraction 0..0.75 (clamped) — multiply incoming contact damage by (1 - this). */
+/** Flat damage subtracted from each contact hit, before Deflection. */
+export function getTowerArmor(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return statValue('armor', levels, loadout);
+}
+
+/** Fraction 0..1 — never clamped; the 5% floor in `towerIncomingDamage` is the real cap. */
 export function getTowerDeflection(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  const runFraction = upgradeValue(UPGRADE_DEFS.deflection, levels.deflection) / 100;
-  const total = runFraction + (loadout?.deflectionBase ?? 0);
-  return Math.min(0.75, total);
+  return statValue('deflection', levels, loadout);
 }
 
-/** Multiplier ≥1 — scrap reward per wave is multiplied by this. */
-export function getTowerScrapBonus(levels: Record<UpgradeId, number>): number {
-  return 1 + upgradeValue(UPGRADE_DEFS.scrapBonus, levels.scrapBonus) / 100;
+/** Fraction 0..1 chance for a hit to crit — stored as a percentage, like the original. */
+export function getTowerCritChance(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return Math.min(1, statValue('critChance', levels, loadout) / 100);
 }
 
-/** Fraction 0..1 (clamped) — chance each hit is a critical: Coilworks-permanent + in-run upgrade. */
-export function getTowerCritChance(loadout?: RunLoadout, levels?: Record<UpgradeId, number>): number {
-  const runFraction = levels ? upgradeValue(UPGRADE_DEFS.critChance, levels.critChance) / 100 : 0;
-  return Math.min(1, runFraction + (loadout?.critChance ?? 0));
+/** Damage multiplier applied to a critical hit (base 1.2). */
+export function getTowerCritMultiplier(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return statValue('critMultiplier', levels, loadout);
 }
 
-export const CRIT_MULTIPLIER = 2;
+/** Flat Charge paid at the end of every wave: in-run branch plus the Coilworks one. */
+export function getChargePerWave(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return statValue('chargePerWave', levels) + (loadout?.chargePerWave ?? 0);
+}
 
-/** Flat damage subtracted from each contact hit, before Deflection: Coilworks-permanent + in-run upgrade. */
-export function getTowerArmor(loadout?: RunLoadout, levels?: Record<UpgradeId, number>): number {
-  const runFlat = levels ? upgradeValue(UPGRADE_DEFS.armor, levels.armor) : 0;
-  return runFlat + (loadout?.armor ?? 0);
+/** Flat Scrap paid at the end of every wave: in-run branch plus the Coilworks one. */
+export function getScrapPerWave(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
+  return statValue('scrapPerWave', levels) + (loadout?.scrapPerWave ?? 0);
 }
 
 /** Fraction bonus applied to every Charge drop (Coilworks-only). */
 export function getTowerChargeBonus(loadout?: RunLoadout): number {
   return loadout?.chargeBonus ?? 0;
+}
+
+/** Fraction bonus applied to every Scrap drop (Coilworks-only). */
+export function getTowerScrapBonus(loadout?: RunLoadout): number {
+  return loadout?.scrapPerKillBonus ?? 0;
 }

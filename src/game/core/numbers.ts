@@ -45,3 +45,27 @@ export function formatInt(value: number): string {
 export function formatPercent(value: number, decimals = 1): string {
   return `${trimTrailingZeros(value.toFixed(decimals))}%`;
 }
+
+/**
+ * How an upgrade's raw value is written on a row. `display` comes from the
+ * def (data/coilworks.ts `CoilworksDisplay`), so both the Coilworks screen
+ * and the in-battle bar render the same stat the same way — including the
+ * original's own quirk that Crit Chance is stored as a percentage while
+ * Deflection is stored as a 0..1 fraction.
+ */
+export function formatStatValue(display: StatDisplay, value: number): string {
+  switch (display) {
+    case 'rate':
+      return `${formatNumber(value, 2)}/s`;
+    case 'percent':
+      return formatPercent(value);
+    case 'fractionPercent':
+      return formatPercent(value * 100);
+    case 'multiplier':
+      return `${formatNumber(value, 2)}x`;
+    default:
+      return formatNumber(value, 2);
+  }
+}
+
+export type StatDisplay = 'number' | 'rate' | 'percent' | 'fractionPercent' | 'multiplier';

@@ -8,7 +8,9 @@ import type { EnemyKind, WorldState } from '../core/types';
  * Reanimated mapper constantly. Padding to a constant size and hiding unused
  * slots (scale 0) keeps that allocation a one-time cost.
  */
-export const MAX_PER_KIND = 64;
+// Sized above the sim's own NORMAL_MAX_ON_SCREEN cap (120), because that cap
+// is on *total* enemies — a late wave can legitimately be 120 of one kind.
+export const MAX_PER_KIND = 128;
 /** Packed layout per slot: [x, y, finalSkiaScale, dirX, dirY]. */
 export const FIELDS_PER_SLOT = 5;
 

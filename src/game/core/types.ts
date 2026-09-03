@@ -4,6 +4,16 @@
  * and inside the app.
  */
 
+import {
+  REGEN_UPGRADE_BASE_VALUE,
+  TOWER_BASE_ARMOR,
+  TOWER_BASE_ATTACK_SPEED,
+  TOWER_BASE_CRIT_CHANCE,
+  TOWER_BASE_CRIT_MULTIPLIER,
+  TOWER_BASE_DAMAGE,
+  TOWER_BASE_DEFLECTION,
+  TOWER_BASE_HP,
+} from '../data/balance';
 import type { Rng } from './rng';
 
 export type EnemyKind = 'scavenger' | 'hulk' | 'runner';
@@ -29,6 +39,8 @@ export interface Enemy {
   scale: number;
   /** Charge granted to the player when this enemy dies. */
   chargeReward: number;
+  /** Scrap granted to the player when this enemy dies, before the meta multipliers. */
+  scrapReward: number;
   /** Countdown to the next contact hit, once `inContact` is true. */
   attackCooldown: number;
   inContact: boolean;
@@ -65,20 +77,22 @@ export interface BoltEffect {
 }
 
 /**
- * The in-run upgrades bought with Charge. `critChance`/`armor` mirror their
- * Coilworks-permanent counterparts (data/coilworks.ts) rather than being
- * unique to a run — see the loadout-combining pattern on `getTowerDeflection`
- * in data/tower-stats.ts, which `getTowerCritChance`/`getTowerArmor` now follow too.
+ * The in-run upgrades bought with Charge. Every one of them has a permanent
+ * Coilworks counterpart (data/coilworks.ts) that sets its level-0 value, so a
+ * run always starts from the player's meta progress — see `loadoutBaseFor`
+ * in data/tower-stats.ts.
  */
 export type UpgradeId =
   | 'damage'
   | 'attackSpeed'
   | 'critChance'
+  | 'critMultiplier'
   | 'health'
   | 'regen'
-  | 'deflection'
   | 'armor'
-  | 'scrapBonus';
+  | 'deflection'
+  | 'chargePerWave'
+  | 'scrapPerWave';
 
 export interface TowerState {
   levels: Record<UpgradeId, number>;
@@ -87,7 +101,17 @@ export interface TowerState {
   attackCooldown: number;
 }
 
-export type BattlePhase = 'running' | 'wave-clear' | 'ended';
+export type BattlePhase = 'running' | 'ended';
+
+/**
+ * Waves run on a clock, not on a body count: enemies drip in for
+ * WAVE_SPAWN_PHASE_DURATION seconds, then the wave idles for
+ * WAVE_COOLDOWN_DURATION and the next one starts regardless of how much of
+ * the last one is still alive. Survivors carry over and pile up — that
+ * pressure is the whole point, and it is what lets income be "per wave"
+ * (see formulas.waveCountIncomeScale) instead of "per clear".
+ */
+export type WavePhase = 'spawning' | 'cooldown';
 
 export type RunEndReason = 'defeated' | 'retired';
 
@@ -98,20 +122,32 @@ export type RunEndReason = 'defeated' | 'retired';
  * headless (scripts/battle-sim.ts) without a store in the loop.
  */
 export interface RunLoadout {
+  // Level-0 values for the in-run upgrades, each one this player's permanent
+  // Coilworks value for that stat (data/tower-stats.ts `loadoutBaseFor`).
   damageBase: number;
   attackSpeedBase: number;
   healthBase: number;
   regenBase: number;
-  /** Fraction 0..1. */
-  critChance: number;
   /** Flat damage subtracted from each contact hit, before deflection. */
-  armor: number;
-  /** Fraction 0..1, added to the in-run Deflection upgrade's own fraction. */
+  armorBase: number;
+  /** Fraction 0..1 of incoming damage removed. */
   deflectionBase: number;
-  /** Flat Scrap added to every wave's reward, before the Voltage/scrap-bonus multipliers. */
+  /** Percentage, not a fraction — the Spire starts at 1. */
+  critChanceBase: number;
+  /** Damage multiplier on a critical hit — the Spire starts at 1.2. */
+  critMultiplierBase: number;
+
+  // Flat wave-end payouts and drop bonuses — these have no in-run base, they
+  // simply add on top of whatever the in-run branches pay.
+  /** Flat Charge paid at the end of each wave, once the branch is unlocked. */
+  chargePerWave: number;
+  /** Flat Scrap paid at the end of each wave, once the branch is unlocked. */
   scrapPerWave: number;
   /** Fraction 0..1 bonus to Charge drops. */
   chargeBonus: number;
+  /** Fraction 0..1 bonus to Scrap drops. */
+  scrapPerKillBonus: number;
+
   voltageTier: number;
   scrapMult: number;
   enemyHpMult: number;
@@ -132,25 +168,34 @@ function allUpgradesUnlocked(): Record<UpgradeId, boolean> {
     damage: true,
     attackSpeed: true,
     critChance: true,
+    critMultiplier: true,
     health: true,
     regen: true,
-    deflection: true,
     armor: true,
-    scrapBonus: true,
+    deflection: true,
+    chargePerWave: true,
+    scrapPerWave: true,
   };
 }
 
+/**
+ * A player who has bought nothing: the original's own starting Spire. Used by
+ * the headless harness and by any UI preview rendered before a run exists.
+ */
 export function defaultRunLoadout(): RunLoadout {
   return {
-    damageBase: 14,
-    attackSpeedBase: 1.0,
-    healthBase: 6,
-    regenBase: 0.2,
-    critChance: 0,
-    armor: 0,
-    deflectionBase: 0,
+    damageBase: TOWER_BASE_DAMAGE,
+    attackSpeedBase: TOWER_BASE_ATTACK_SPEED,
+    healthBase: TOWER_BASE_HP,
+    regenBase: REGEN_UPGRADE_BASE_VALUE,
+    armorBase: TOWER_BASE_ARMOR,
+    deflectionBase: TOWER_BASE_DEFLECTION,
+    critChanceBase: TOWER_BASE_CRIT_CHANCE,
+    critMultiplierBase: TOWER_BASE_CRIT_MULTIPLIER,
+    chargePerWave: 0,
     scrapPerWave: 0,
     chargeBonus: 0,
+    scrapPerKillBonus: 0,
     voltageTier: 1,
     scrapMult: 1,
     enemyHpMult: 1,
@@ -185,18 +230,21 @@ export interface WorldState {
 
   wave: number;
   isBossWave: boolean;
-  /** Entries still to spawn this wave (drip-fed, not a burst). */
+  wavePhase: WavePhase;
+  /** Seconds left in the current wave phase — drives both pacing and the HUD bar. */
+  phaseTimeLeft: number;
+  /** Entries still to spawn this wave (drip-fed over the spawn phase). */
   spawnQueue: SpawnEntry[];
+  /** How many entries this wave started with — the HUD bar's denominator. */
+  waveSpawnTotal: number;
   spawnTimer: number;
   /**
    * True from the start of a boss wave until the boss entry is dequeued.
-   * `isWaveCleared` needs this: a boss wave clears the instant the boss dies,
-   * even if escort mobs are still queued or alive — this flag is what tells
-   * it "the boss existed and hasn't spawned yet" vs. "it's dead".
+   * Waves no longer wait for the boss to die, but the HUD still shows the
+   * boss's HP as the wave bar, and needs to tell "hasn't spawned yet" apart
+   * from "already dead".
    */
   bossPending: boolean;
-  /** Pause between a cleared wave and the next one starting. */
-  waveTimer: number;
 
   enemies: Enemy[];
   tower: TowerState;

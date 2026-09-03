@@ -29,14 +29,15 @@ export function HudTop({ onSettingsPress, onSetSpeed }: HudTopProps) {
   const scrapEarned = useBattleStore((s) => s.scrapEarned);
   const wave = useBattleStore((s) => s.wave);
   const isBossWave = useBattleStore((s) => s.isBossWave);
-  const total = useBattleStore((s) => s.waveEnemiesTotal);
-  const remaining = useBattleStore((s) => s.waveEnemiesRemaining);
+  const waveProgress = useBattleStore((s) => s.waveProgress);
   const bossHpFraction = useBattleStore((s) => s.bossHpFraction);
 
   // On a boss wave the bar tracks boss HP (damage taken), not raw kill
   // count — it advances with every hit and finishes exactly when the boss
   // dies, regardless of how much escort is still alive. See battle-store.
-  const progress = isBossWave ? 1 - bossHpFraction : total > 0 ? 1 - remaining / total : 0;
+  // On a boss wave the bar is the boss's remaining HP instead of the clock,
+  // so it finishes exactly when the boss dies.
+  const progress = isBossWave ? 1 - bossHpFraction : waveProgress;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
