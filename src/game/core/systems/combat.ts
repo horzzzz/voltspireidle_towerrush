@@ -55,11 +55,22 @@ function emitBolt(world: WorldState, targetX: number, targetY: number, isCrit: b
  * the Voltage multiplier and the Coilworks Scrap/Kill Bonus — the flat
  * per-wave payouts in `world.payWaveCycle` deliberately take neither, matching
  * the original.
+ *
+ * Chips layer on top, at the same site the original applies its own
+ * `chip_stat_multiplier("charge_bonus"/"all_scrap_bonus")`: Charge and Scrap
+ * chips always, Critical Scrap only when the blow that finished this enemy
+ * off was a crit.
  */
-function killEnemy(world: WorldState, enemy: Enemy): void {
+function killEnemy(world: WorldState, enemy: Enemy, killedByCrit: boolean): void {
   const { loadout } = world;
-  world.charge += enemy.chargeReward * (1 + getTowerChargeBonus(loadout));
-  world.scrapEarned += enemy.scrapReward * loadout.scrapMult * (1 + getTowerScrapBonus(loadout));
+  const { chips } = loadout;
+  world.charge += enemy.chargeReward * (1 + getTowerChargeBonus(loadout)) * chips.chargeMult;
+  world.scrapEarned +=
+    enemy.scrapReward *
+    loadout.scrapMult *
+    (1 + getTowerScrapBonus(loadout)) *
+    chips.scrapMult *
+    (killedByCrit ? chips.critScrapMult : 1);
   world.killCount += 1;
   if (enemy.isBoss) world.bossKills += 1;
   if (enemy.dropsGem) world.gemsCollected += 1;
@@ -101,7 +112,7 @@ function applyDamage(world: WorldState, enemy: Enemy, amount: number, isCrit: bo
   });
   emitVfx(world, { type: 'damage', x: enemy.x, y: enemy.y, amount, isCrit, isBoss: enemy.isBoss });
 
-  if (enemy.hp <= 0) killEnemy(world, enemy);
+  if (enemy.hp <= 0) killEnemy(world, enemy, isCrit);
 }
 
 /** Tower auto-attacks the nearest in-range enemy once its cooldown expires. */

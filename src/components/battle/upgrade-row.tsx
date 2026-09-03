@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
 import { formatNumber, formatStatValue } from '@/game/core/numbers';
-import { loadoutBaseFor, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
+import { chipAwareStatValue, type UpgradeDef } from '@/game/data/tower-stats';
 import type { RunLoadout, UpgradeId } from '@/game/core/types';
 
 const ICONS: Record<UpgradeDef['icon'], number> = {
@@ -22,8 +22,8 @@ const ICONS: Record<UpgradeDef['icon'], number> = {
   charge: require('@/assets/images/battle/icon-charge.png'),
 };
 
-function formatStat(def: UpgradeDef, level: number, base: number | undefined): string {
-  return formatStatValue(def.display, upgradeValue(def, level, base));
+function formatStat(def: UpgradeDef, level: number, loadout: RunLoadout): string {
+  return formatStatValue(def.display, chipAwareStatValue(def.id, level, loadout));
 }
 
 type UpgradeRowProps = {
@@ -52,7 +52,6 @@ type UpgradeRowProps = {
  */
 export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, affordable, loadout, onBuy }: UpgradeRowProps) {
   const maxed = cost == null;
-  const base = loadoutBaseFor(def.id, loadout);
 
   return (
     <Pressable
@@ -63,8 +62,8 @@ export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, affor
       <View style={styles.labels}>
         <Text style={styles.name}>{def.label}</Text>
         <Text style={styles.values}>
-          {formatStat(def, level, base)} <Text style={styles.arrow}>→</Text>{' '}
-          <Text style={styles.to}>{maxed ? 'MAX' : formatStat(def, level + 1, base)}</Text>
+          {formatStat(def, level, loadout)} <Text style={styles.arrow}>→</Text>{' '}
+          <Text style={styles.to}>{maxed ? 'MAX' : formatStat(def, level + 1, loadout)}</Text>
         </Text>
       </View>
       {!maxed && (

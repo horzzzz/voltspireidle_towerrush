@@ -1,4 +1,4 @@
-import { isUpgradeMaxed, UPGRADE_DEFS, upgradeCost, upgradeValue } from '../data/tower-stats';
+import { chipAwareStatValue, isUpgradeMaxed, UPGRADE_DEFS, upgradeCostFor } from '../data/tower-stats';
 import { emitVfx } from './types';
 import type { UpgradeId, WorldState } from './types';
 
@@ -22,7 +22,7 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
 
   if (isUpgradeMaxed(def, level)) return 'maxed';
 
-  const cost = upgradeCost(def, level);
+  const cost = upgradeCostFor(def, level, world.loadout);
   if (world.charge < cost) return 'too-expensive';
 
   world.charge -= cost;
@@ -30,8 +30,10 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
   world.upgradesBought += 1;
 
   if (id === 'health') {
-    const base = world.loadout.healthBase;
-    const delta = upgradeValue(def, level + 1, base) - upgradeValue(def, level, base);
+    // Chip-aware on both sides (Extra Defense multiplies max HP), or the
+    // top-up would drift away from the max the HUD ring is drawn against.
+    const delta =
+      chipAwareStatValue('health', level + 1, world.loadout) - chipAwareStatValue('health', level, world.loadout);
     world.tower.health += delta;
   }
 
@@ -42,5 +44,5 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
 export function getUpgradeCostOrNull(world: WorldState, id: UpgradeId): number | null {
   const def = UPGRADE_DEFS[id];
   const level = world.tower.levels[id];
-  return isUpgradeMaxed(def, level) ? null : upgradeCost(def, level);
+  return isUpgradeMaxed(def, level) ? null : upgradeCostFor(def, level, world.loadout);
 }

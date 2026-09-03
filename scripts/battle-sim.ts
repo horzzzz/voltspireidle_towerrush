@@ -7,6 +7,11 @@
  *   npm run sim -- --voltage=2        -- Voltage 2 multipliers, no Coilworks
  *   npm run sim -- --coilworks=20     -- every Coilworks branch at level 20
  *   npm run sim -- --waves=200        -- run further than the default 50
+ *   npm run sim -- --chips=scrap:6,charge:3
+ *                                     -- equip chips at the given levels
+ *                                        (level defaults to 1; the socket cap
+ *                                        of the real game is not enforced
+ *                                        here, so effects can be isolated)
  *
  * Strategy modeled: spend Charge greedily on whichever affordable upgrade is
  * cheapest, every time enough Charge is banked. Not optimal play, just a
@@ -17,6 +22,7 @@ import { UPGRADE_ORDER, getTowerAttackSpeed, getTowerDamage, getTowerMaxHealth }
 import { buyUpgrade } from '../src/game/core/upgrades';
 import { createWorld, FIXED_DT, tickWorld } from '../src/game/core/world';
 import { buildRunLoadout } from '../src/game/economy/loadout';
+import { CHIP_BY_ID, CHIP_MAX_LEVEL } from '../src/game/data/chips';
 import {
   COILWORKS_ORDER,
   COILWORKS_UNLOCKS,
@@ -32,10 +38,30 @@ function argValue(name: string): string | null {
   return arg ? arg.split('=')[1] : null;
 }
 
+/** `--chips=scrap:6,charge` -> ids in socket order plus their levels. */
+function parseChips(): { equipped: string[]; levels: Record<string, number> } {
+  const raw = argValue('chips');
+  const equipped: string[] = [];
+  const levels: Record<string, number> = {};
+  if (!raw) return { equipped, levels };
+
+  for (const entry of raw.split(',')) {
+    const [id, levelText] = entry.split(':');
+    if (!CHIP_BY_ID[id]) {
+      console.log(`unknown chip id "${id}" — known: ${Object.keys(CHIP_BY_ID).join(', ')}`);
+      process.exit(1);
+    }
+    equipped.push(id);
+    levels[id] = Math.min(CHIP_MAX_LEVEL, Math.max(1, Number(levelText ?? '1')));
+  }
+  return { equipped, levels };
+}
+
 function run(): void {
   const voltageTier = Number(argValue('voltage') ?? '1');
   const coilworksLevel = Number(argValue('coilworks') ?? '0');
   const maxWave = Number(argValue('waves') ?? '80');
+  const chips = parseChips();
 
   const coilworksLevels = createInitialCoilworksLevels();
   const unlocked = createInitialCoilworksUnlocked();
@@ -45,12 +71,14 @@ function run(): void {
     for (const id of COILWORKS_ORDER) coilworksLevels[id as CoilworksUpgradeId] = coilworksLevel;
     for (const id of Object.keys(COILWORKS_UNLOCKS) as CoilworksUnlockId[]) unlocked[id] = true;
   }
-  const loadout = buildRunLoadout(coilworksLevels, voltageTier, unlocked);
+  const loadout = buildRunLoadout(coilworksLevels, voltageTier, unlocked, chips.equipped, chips.levels);
 
   const world = createWorld(SEED, loadout);
   let lastWave = 0;
 
-  console.log(`Voltage ${voltageTier}, Coilworks level ${coilworksLevel}\n`);
+  const chipsLabel =
+    chips.equipped.length > 0 ? chips.equipped.map((id) => `${id} lvl ${chips.levels[id]}`).join(', ') : 'none';
+  console.log(`Voltage ${voltageTier}, Coilworks level ${coilworksLevel}, chips: ${chipsLabel}\n`);
   console.log('wave  time(s)  hp/max        dmg    atk/s  charge  scrap   kills alive  scrap/hr');
 
   while (world.wave <= maxWave && world.phase !== 'ended') {

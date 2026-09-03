@@ -217,6 +217,16 @@ export function upgradeCost(def: UpgradeDef, level: number): number {
   return geometricCost(def.baseCost, def.costGrowth, level);
 }
 
+/**
+ * The price the player actually pays, once the run's Chips are taken into
+ * account (Free Upgrades divides it). Everything that shows or charges a
+ * Charge price goes through here — `buyUpgrade` and the UpgradeBar both — so
+ * the number on the row is always the number that gets deducted.
+ */
+export function upgradeCostFor(def: UpgradeDef, level: number, loadout?: RunLoadout): number {
+  return upgradeCost(def, level) * (loadout?.chips.upgradeCostMult ?? 1);
+}
+
 export function isUpgradeMaxed(def: UpgradeDef, level: number): boolean {
   return def.maxLevel != null && level >= def.maxLevel;
 }
@@ -267,13 +277,42 @@ export function loadoutBaseFor(id: UpgradeId, loadout?: RunLoadout): number | un
   }
 }
 
+/**
+ * The Chip multiplier that applies to one stat, 1 for the stats no chip
+ * touches — see `data/chips.ts`. Multiplicative and applied *after* the level
+ * curve, so an additive branch (Attack Speed) still gets its flat per-level
+ * steps first and the chip scales the total.
+ */
+export function chipStatMultiplier(id: UpgradeId, loadout?: RunLoadout): number {
+  if (!loadout) return 1;
+  switch (id) {
+    case 'attackSpeed':
+      return loadout.chips.attackSpeedMult;
+    case 'health':
+      return loadout.chips.maxHealthMult;
+    case 'critChance':
+      return loadout.chips.critChanceMult;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * One stat at one level: the def's curve, the Coilworks base from the
+ * loadout, then the Chip multiplier. The UpgradeRow's "current → next"
+ * preview uses this too, so what the row promises is what the sim computes.
+ */
+export function chipAwareStatValue(id: UpgradeId, level: number, loadout?: RunLoadout): number {
+  return upgradeValue(UPGRADE_DEFS[id], level, loadoutBaseFor(id, loadout)) * chipStatMultiplier(id, loadout);
+}
+
 // --- Derived live tower stats, always computed from levels (never cached) ---
 // `loadout` is optional so the headless sim (createWorld with no loadout arg)
 // and any UI preview before a run starts can still call these with the def's
 // own defaults — see `upgradeValue`'s `baseOverride`.
 
 function statValue(id: UpgradeId, levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {
-  return upgradeValue(UPGRADE_DEFS[id], levels[id], loadoutBaseFor(id, loadout));
+  return chipAwareStatValue(id, levels[id], loadout);
 }
 
 export function getTowerDamage(levels: Record<UpgradeId, number>, loadout?: RunLoadout): number {

@@ -6,6 +6,7 @@ import {
   type CoilworksUnlockId,
   type CoilworksUpgradeId,
 } from '../data/coilworks';
+import { buildChipModifiers } from '../data/chips';
 import { getVoltage } from '../data/voltages';
 import type { RunLoadout, UpgradeId } from '../core/types';
 
@@ -17,11 +18,17 @@ import type { RunLoadout, UpgradeId } from '../core/types';
  *
  * A locked branch contributes its level-0 value, not zero: a player who never
  * bought "Unlock defense upgrades" still has the Spire's base 6 HP.
+ *
+ * The equipped Chips come last and default to "none equipped", whose
+ * modifiers are all 1 — so the headless harness and anything else calling
+ * this with three arguments gets the same run it always did.
  */
 export function buildRunLoadout(
   coilworksLevels: Record<CoilworksUpgradeId, number>,
   voltageTier: number,
   coilworksUnlocked: Record<CoilworksUnlockId, boolean> = createInitialCoilworksUnlocked(),
+  equippedChips: readonly string[] = [],
+  chipLevels: Readonly<Record<string, number>> = {},
 ): RunLoadout {
   const value = (id: CoilworksUpgradeId) => {
     const def = COILWORKS_DEFS[id];
@@ -67,6 +74,8 @@ export function buildRunLoadout(
     scrapPerWave: unlocked('scrapPerWave') ? value('scrapPerWave') : 0,
     chargeBonus: value('chargeBonus'),
     scrapPerKillBonus: value('scrapPerKillBonus'),
+
+    chips: buildChipModifiers(equippedChips, chipLevels),
 
     voltageTier,
     scrapMult: voltage.scrapMult,

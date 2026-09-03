@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UpgradeRow } from './upgrade-row';
 import type { UpgradeId } from '@/game/core/types';
 import { useBattleStore } from '@/game/state/battle-store';
-import { isUpgradeMaxed, upgradeCost, UPGRADE_DEFS, UPGRADE_ORDER } from '@/game/data/tower-stats';
+import { isUpgradeMaxed, upgradeCostFor, UPGRADE_DEFS, UPGRADE_ORDER } from '@/game/data/tower-stats';
 
 type UpgradeBarProps = { onBuy: (id: UpgradeId) => void };
 
@@ -33,7 +33,7 @@ export function UpgradeBar({ onBuy }: UpgradeBarProps) {
         const def = UPGRADE_DEFS[id];
         const level = levels[id];
         const maxed = isUpgradeMaxed(def, level);
-        const cost = maxed ? null : upgradeCost(def, level);
+        const cost = maxed ? null : upgradeCostFor(def, level, loadout);
         return (
           <UpgradeRow
             key={id}

@@ -23,8 +23,12 @@ export default function BattleScreen() {
   const coilworks = useMetaStore((s) => s.coilworks);
   const coilworksUnlocked = useMetaStore((s) => s.coilworksUnlocked);
   const voltage = useMetaStore((s) => s.voltage);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadout is intentionally frozen for the run's lifetime
-  const loadout = useMemo(() => buildRunLoadout(coilworks, voltage, coilworksUnlocked), []);
+  const chips = useMetaStore((s) => s.chips);
+  const loadout = useMemo(
+    () => buildRunLoadout(coilworks, voltage, coilworksUnlocked, chips.equipped, chips.levels),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadout is intentionally frozen for the run's lifetime
+    [],
+  );
 
   const { buffers, vfx, actions } = useBattleEngine(loadout);
   const [settingsVisible, setSettingsVisible] = useState(false);

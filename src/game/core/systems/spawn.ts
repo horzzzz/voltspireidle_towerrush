@@ -119,7 +119,12 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
   // and stop reading as slow.
   const stats = entry.isBoss ? config.boss! : config.regular;
   const scale = entry.isBoss ? profile.scale * BOSS_PROFILE.scaleMul : profile.scale;
-  const hp = entry.isBoss ? stats.hp : stats.hp * profile.hpMul;
+  // Enemy Balance (chip) softens the wave's toughest bodies only — the boss
+  // and the tank kind — so it reads as "the spike is less of a wall" rather
+  // than as a flat HP discount on the whole wave.
+  const isTough = entry.isBoss || entry.kind === 'hulk';
+  const toughMul = isTough ? world.loadout.chips.toughHpMult : 1;
+  const hp = (entry.isBoss ? stats.hp : stats.hp * profile.hpMul) * toughMul;
   const speed = entry.isBoss ? stats.speed : stats.speed * profile.speedMul;
   const damage = entry.isBoss ? stats.damage : stats.damage * profile.dmgMul;
 

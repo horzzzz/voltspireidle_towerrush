@@ -151,6 +151,44 @@ export type WavePhase = 'spawning' | 'cooldown';
 export type RunEndReason = 'defeated' | 'retired';
 
 /**
+ * What the equipped Chips are worth for one run — see `data/chips.ts`
+ * (`buildChipModifiers`). Every field is a plain multiplier with 1 as its
+ * neutral value, so a player with no chips equipped produces exactly the
+ * numbers the sim had before chips existed.
+ */
+export interface ChipModifiers {
+  /** Multiplies the Spire's attack speed. */
+  attackSpeedMult: number;
+  /** Multiplies the Spire's maximum health. */
+  maxHealthMult: number;
+  /** Multiplies crit chance (before the 100% clamp). */
+  critChanceMult: number;
+  /** Multiplies Scrap dropped per kill. */
+  scrapMult: number;
+  /** Multiplies Charge dropped per kill. */
+  chargeMult: number;
+  /** Extra Scrap multiplier applied only when the killing blow was a crit. */
+  critScrapMult: number;
+  /** Multiplies the HP of the wave's toughest bodies (bosses and hulks). */
+  toughHpMult: number;
+  /** Multiplies the Charge price of in-run upgrades (< 1 is a discount). */
+  upgradeCostMult: number;
+}
+
+export function neutralChipModifiers(): ChipModifiers {
+  return {
+    attackSpeedMult: 1,
+    maxHealthMult: 1,
+    critChanceMult: 1,
+    scrapMult: 1,
+    chargeMult: 1,
+    critScrapMult: 1,
+    toughHpMult: 1,
+    upgradeCostMult: 1,
+  };
+}
+
+/**
  * Meta -> run bridge, built once per run by economy/loadout.ts from the
  * player's persisted Coilworks levels and selected Voltage. The sim reads
  * this and nothing else from the meta layer — keeps `createWorld` callable
@@ -182,6 +220,9 @@ export interface RunLoadout {
   chargeBonus: number;
   /** Fraction 0..1 bonus to Scrap drops. */
   scrapPerKillBonus: number;
+
+  /** What the equipped Chips are worth this run — see ChipModifiers. */
+  chips: ChipModifiers;
 
   voltageTier: number;
   scrapMult: number;
@@ -231,6 +272,7 @@ export function defaultRunLoadout(): RunLoadout {
     scrapPerWave: 0,
     chargeBonus: 0,
     scrapPerKillBonus: 0,
+    chips: neutralChipModifiers(),
     voltageTier: 1,
     scrapMult: 1,
     enemyHpMult: 1,

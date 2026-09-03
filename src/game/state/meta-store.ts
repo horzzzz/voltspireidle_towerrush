@@ -15,12 +15,21 @@ import {
   type CoilworksUnlockId,
   type CoilworksUpgradeId,
 } from '../data/coilworks';
+import {
+  CHIP_BY_ID,
+  CHIP_LEVEL_UP_GEMS,
+  CHIP_MAX_LEVEL,
+  CHIP_PULL_COST,
+  nextSocketCost,
+  rollChipId,
+} from '../data/chips';
 import { DAILY_MISSION_COUNT, DAILY_MISSION_REWARD, WEEKLY_LADDER } from '../data/missions';
 import { dailyRewardForDay } from '../data/daily';
 import { MILESTONES, milestoneKey } from '../data/milestones';
 import { DEFAULT_SKIN_ID, isSkinUnlocked, SKINS } from '../data/skins';
 import { getVoltage, isVoltageUnlocked } from '../data/voltages';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, rollWheelIndex, type WheelSector } from '../data/wheel';
+import { Rng } from '../core/rng';
 import type { RunSummary } from '../core/types';
 
 /** Thin sync adapter — `expo-sqlite/kv-store` is a drop-in AsyncStorage
@@ -52,6 +61,36 @@ interface WheelState {
   freeSpins: number;
 }
 
+/**
+ * The Chips collection — same split as the original's save (`chip_levels`,
+ * `chip_copies`, `equipped_chip_ids`): a chip is *owned* once it has a level,
+ * and every later copy of it lands in `copies` as a duplicate that can be
+ * spent on a level-up.
+ */
+interface ChipsState {
+  /** Owned chips only, 1..CHIP_MAX_LEVEL. Absence = never pulled. */
+  levels: Record<string, number>;
+  /** Unspent duplicates per chip. */
+  copies: Record<string, number>;
+  /** Unlocked loadout sockets, 1..CHIP_MAX_SOCKETS. */
+  sockets: number;
+  /** Equipped chip ids, in socket order; never longer than `sockets`. */
+  equipped: string[];
+  pulls: number;
+  /** Pulls since the last rare — see CHIP_PITY_PULLS. */
+  pityCounter: number;
+}
+
+function createInitialChipsState(): ChipsState {
+  return { levels: {}, copies: {}, sockets: 1, equipped: [], pulls: 0, pityCounter: 0 };
+}
+
+export interface ChipPullResult {
+  id: string;
+  /** False when the pull produced a duplicate of a chip already owned. */
+  isNew: boolean;
+}
+
 export interface WheelSpinResult {
   sectorIndex: number;
   sector: WheelSector;
@@ -76,6 +115,8 @@ interface MetaState {
   clockHighWater: number;
   /** Tower skin worn in battle — see data/skins.ts. Always an unlocked id. */
   selectedSkin: string;
+  /** Chips collection + loadout — see data/chips.ts. */
+  chips: ChipsState;
 
   /** Folds a finished run's earnings into the persisted totals. */
   bankRun: (summary: RunSummary) => void;
@@ -97,6 +138,16 @@ interface MetaState {
    * No-op returning `false` when the player can't afford it.
    */
   buyScrap: (gemCost: number, scrapAmount: number) => boolean;
+
+  /** One gacha pull for CHIP_PULL_COST gems. `null` when unaffordable. */
+  pullChip: () => ChipPullResult | null;
+  /** Spends one duplicate + CHIP_LEVEL_UP_GEMS gems to raise a chip a level. */
+  levelUpChip: (id: string) => boolean;
+  /** Puts an owned chip into the first free socket. */
+  equipChip: (id: string) => boolean;
+  unequipChip: (id: string) => boolean;
+  /** Buys the next loadout socket — see data/chips.CHIP_SOCKET_COSTS. */
+  unlockChipSocket: () => boolean;
 }
 
 function nowClamped(state: MetaState): number {
@@ -124,6 +175,7 @@ export const useMetaStore = create<MetaState>()(
       wheel: { lastSpinAt: 0, freeSpins: 0 },
       clockHighWater: 0,
       selectedSkin: DEFAULT_SKIN_ID,
+      chips: createInitialChipsState(),
 
       bankRun: (summary) => {
         const state = get();
@@ -323,17 +375,101 @@ export const useMetaStore = create<MetaState>()(
         set((s) => ({ gems: s.gems - gemCost, scrap: s.scrap + scrapAmount }));
         return true;
       },
+
+      // Unlike the daily missions (deterministic from the day key), a pull is
+      // meant to be unpredictable, so the seed is wall-clock mixed with the
+      // pull counter — two taps in the same millisecond still roll apart.
+      pullChip: () => {
+        const state = get();
+        if (state.gems < CHIP_PULL_COST) return null;
+
+        const rng = new Rng((Date.now() ^ Math.imul(state.chips.pulls + 1, 2654435761)) >>> 0);
+        const id = rollChipId(rng, state.chips.pityCounter);
+        const isNew = (state.chips.levels[id] ?? 0) === 0;
+        const isRare = CHIP_BY_ID[id].rarity === 'rare';
+
+        set((s) => {
+          const levels = isNew ? { ...s.chips.levels, [id]: 1 } : s.chips.levels;
+          const copies = isNew ? s.chips.copies : { ...s.chips.copies, [id]: (s.chips.copies[id] ?? 0) + 1 };
+          // The very first chip goes straight into the empty socket: a first
+          // pull that visibly does nothing is the worst possible read of the
+          // system. Every later pull is the player's own choice to equip.
+          const autoEquip = isNew && s.chips.equipped.length === 0;
+          return {
+            gems: s.gems - CHIP_PULL_COST,
+            chips: {
+              ...s.chips,
+              levels,
+              copies,
+              equipped: autoEquip ? [id] : s.chips.equipped,
+              pulls: s.chips.pulls + 1,
+              pityCounter: isRare ? 0 : s.chips.pityCounter + 1,
+            },
+          };
+        });
+        return { id, isNew };
+      },
+
+      levelUpChip: (id) => {
+        const state = get();
+        const level = state.chips.levels[id] ?? 0;
+        if (level < 1 || level >= CHIP_MAX_LEVEL) return false;
+        if ((state.chips.copies[id] ?? 0) < 1) return false;
+        if (state.gems < CHIP_LEVEL_UP_GEMS) return false;
+
+        set((s) => ({
+          gems: s.gems - CHIP_LEVEL_UP_GEMS,
+          chips: {
+            ...s.chips,
+            levels: { ...s.chips.levels, [id]: level + 1 },
+            copies: { ...s.chips.copies, [id]: (s.chips.copies[id] ?? 0) - 1 },
+          },
+        }));
+        return true;
+      },
+
+      equipChip: (id) => {
+        const state = get();
+        if (!CHIP_BY_ID[id]) return false;
+        if ((state.chips.levels[id] ?? 0) < 1) return false;
+        if (state.chips.equipped.includes(id)) return false;
+        if (state.chips.equipped.length >= state.chips.sockets) return false;
+        set((s) => ({ chips: { ...s.chips, equipped: [...s.chips.equipped, id] } }));
+        return true;
+      },
+
+      unequipChip: (id) => {
+        const state = get();
+        if (!state.chips.equipped.includes(id)) return false;
+        set((s) => ({ chips: { ...s.chips, equipped: s.chips.equipped.filter((c) => c !== id) } }));
+        return true;
+      },
+
+      unlockChipSocket: () => {
+        const state = get();
+        const cost = nextSocketCost(state.chips.sockets);
+        if (cost == null) return false;
+        if (state.gems < cost) return false;
+        set((s) => ({ gems: s.gems - cost, chips: { ...s.chips, sockets: s.chips.sockets + 1 } }));
+        return true;
+      },
     }),
     {
       name: 'voltspire-meta',
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => sqliteStateStorage),
       // v1 only had {scrap, gems, highestWave}. v2 fanned that out per-Voltage
       // and added the rest of the economy. v3 reworked Coilworks to the
       // original's own branch set and its group-based unlocks, so levels and
       // unlock flags can't carry over field-for-field — currencies, wave
-      // records and every other system do. v4 added the equipped tower skin.
-      migrate: (persisted) => {
+      // records and every other system do. v4 added the equipped tower skin,
+      // v5 the Chips collection.
+      //
+      // Version-aware on purpose: only a pre-v3 save has Coilworks in the old
+      // shape, so only it gets reset. Ignoring `version` here (as this did
+      // before v5) would wipe every player's Coilworks progress on any later
+      // bump — the reset is a one-time shape change, not a migration policy.
+      migrate: (persisted, version) => {
         const old = persisted as
           | {
               scrap?: number;
@@ -341,17 +477,24 @@ export const useMetaStore = create<MetaState>()(
               highestWave?: number;
               highestWaveByVoltage?: Record<number, number>;
               selectedSkin?: string;
+              coilworks?: Record<CoilworksUpgradeId, number>;
+              coilworksUnlocked?: Record<CoilworksUnlockId, boolean>;
+              chips?: ChipsState;
             }
           | undefined;
+        const coilworksIsStale = version < 3;
         return {
           ...(persisted as object),
           scrap: old?.scrap ?? 0,
           gems: old?.gems ?? 0,
           voltage: 1,
           highestWaveByVoltage: old?.highestWaveByVoltage ?? (old?.highestWave ? { 1: old.highestWave } : {}),
-          coilworks: createInitialCoilworksLevels(),
-          coilworksUnlocked: createInitialCoilworksUnlocked(),
+          coilworks: coilworksIsStale ? createInitialCoilworksLevels() : (old?.coilworks ?? createInitialCoilworksLevels()),
+          coilworksUnlocked: coilworksIsStale
+            ? createInitialCoilworksUnlocked()
+            : (old?.coilworksUnlocked ?? createInitialCoilworksUnlocked()),
           selectedSkin: old?.selectedSkin ?? DEFAULT_SKIN_ID,
+          chips: old?.chips ?? createInitialChipsState(),
         };
       },
     },
