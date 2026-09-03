@@ -1,9 +1,9 @@
 /**
- * Difficulty tiers. The original ships 21; this port ships 3, but the
- * multipliers are its own ladders (`voltage_hp_ladder_steps`,
- * `voltage_scrap_ladder_steps`, `voltage_dmg_mult_base`) evaluated by
- * `core/formulas.ts`, so extending the list later needs no new numbers —
- * only more entries.
+ * Difficulty tiers — 21, matching the original. The multipliers are its own
+ * ladders (`voltage_hp_ladder_steps`, `voltage_scrap_ladder_steps`,
+ * `voltage_dmg_mult_base`) evaluated by `core/formulas.ts`; only the first 9
+ * steps are the source's confirmed numbers, tiers 10+ extrapolate by repeating
+ * the last step (see `voltspire-pck-extraction` memory for the exact table).
  */
 
 import { voltageDmgMultiplier, voltageHpMultiplier, voltageScrapMultiplier } from '../core/formulas';
@@ -21,7 +21,10 @@ export interface VoltageDef {
   unlockAtPrevWave: number;
 }
 
-const TIER_COUNT = 3;
+/** The original ships 21 tiers. Steps 10+ reuse the last ladder entry (see
+ * balance.ts `VOLTAGE_*_LADDER_STEPS`) — an extrapolation, not the source's
+ * exact numbers (see `voltspire-pck-extraction` memory to pull those). */
+const TIER_COUNT = 21;
 /** Wave 100 on the previous tier, the same gate the original puts on Voltage 2. */
 const UNLOCK_WAVE = 100;
 
@@ -39,6 +42,16 @@ export const VOLTAGES: VoltageDef[] = Array.from({ length: TIER_COUNT }, (_, i) 
 
 export function getVoltage(tier: number): VoltageDef {
   return VOLTAGES.find((v) => v.tier === tier) ?? VOLTAGES[0];
+}
+
+/**
+ * What unlocking `tier` requires: reaching wave `wave` on tier `prevTier`.
+ * `null` when the tier is always open (tier 1) or doesn't exist.
+ */
+export function voltageUnlockRequirement(tier: number): { prevTier: number; wave: number } | null {
+  const def = VOLTAGES.find((v) => v.tier === tier);
+  if (!def || def.unlockAtPrevWave === 0) return null;
+  return { prevTier: tier - 1, wave: def.unlockAtPrevWave };
 }
 
 /** Whether `tier` is playable given each tier's highest wave reached so far. */

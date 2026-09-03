@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SideRail } from '@/components/menu/side-rail';
@@ -8,7 +9,7 @@ import { TopBar } from '@/components/menu/top-bar';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
-import { getVoltage, isVoltageUnlocked, VOLTAGES } from '@/game/data/voltages';
+import { getVoltage, isVoltageUnlocked, voltageUnlockRequirement, VOLTAGES } from '@/game/data/voltages';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const LOGO = require('@/assets/images/splash/logo.png');
@@ -35,9 +36,18 @@ export default function GameScreen() {
   const bestScrapPerHourByVoltage = useMetaStore((s) => s.bestScrapPerHourByVoltage);
   const selectVoltage = useMetaStore((s) => s.selectVoltage);
 
-  const voltage = getVoltage(voltageTier);
-  const canPrev = voltageTier > 1;
-  const canNext = voltageTier < VOLTAGES.length && isVoltageUnlocked(voltageTier + 1, highestWaveByVoltage);
+  // Which tier the panel is *browsing* — free to roam every tier, locked or not.
+  // The selected tier for a run (`voltageTier`) only follows it onto unlocked ones.
+  const [viewTier, setViewTier] = useState(voltageTier);
+  const voltage = getVoltage(viewTier);
+  const unlocked = isVoltageUnlocked(viewTier, highestWaveByVoltage);
+  const req = voltageUnlockRequirement(viewTier);
+  const canPrev = viewTier > 1;
+  const canNext = viewTier < VOLTAGES.length;
+
+  useEffect(() => {
+    if (unlocked && viewTier !== voltageTier) selectVoltage(viewTier);
+  }, [unlocked, viewTier, voltageTier, selectVoltage]);
 
   return (
     <ScrollView
@@ -59,17 +69,22 @@ export default function GameScreen() {
       <StatsPanel
         tier={voltage.name}
         multiplier={`x${voltage.scrapMult}`}
-        scrapPerHour={formatNumber(bestScrapPerHourByVoltage[voltageTier] ?? 0)}
-        highest={formatInt(highestWaveByVoltage[voltageTier] ?? 0)}
-        onPrev={canPrev ? () => selectVoltage(voltageTier - 1) : undefined}
-        onNext={canNext ? () => selectVoltage(voltageTier + 1) : undefined}
+        scrapPerHour={formatNumber(bestScrapPerHourByVoltage[viewTier] ?? 0)}
+        highest={formatInt(highestWaveByVoltage[viewTier] ?? 0)}
+        locked={!unlocked}
+        lockHint={req ? `Reach wave ${req.wave} on Voltage ${req.prevTier}` : undefined}
+        showScrapFarm={viewTier === 1}
+        onPrev={canPrev ? () => setViewTier((t) => t - 1) : undefined}
+        onNext={canNext ? () => setViewTier((t) => t + 1) : undefined}
       />
 
       <View style={styles.bonus}>
-        <Text style={styles.bonusPrimary} numberOfLines={1} adjustsFontSizeToFit>
-          Scrap bonus in effect x{voltage.scrapMult}
-        </Text>
-        {ADS_ENABLED && (
+        {unlocked && (
+          <Text style={styles.bonusPrimary} numberOfLines={1} adjustsFontSizeToFit>
+            Scrap bonus in effect x{voltage.scrapMult}
+          </Text>
+        )}
+        {ADS_ENABLED && unlocked && (
           <View style={styles.bonusRow}>
             <Text style={styles.bonusSecondary} numberOfLines={1} adjustsFontSizeToFit>
               x2 scrap bonus for 10 minutes

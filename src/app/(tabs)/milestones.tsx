@@ -7,7 +7,7 @@ import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { useMetaStore } from '@/game/state/meta-store';
 import { formatNumber } from '@/game/core/numbers';
 import { MILESTONES, milestoneKey } from '@/game/data/milestones';
-import { getVoltage, isVoltageUnlocked, VOLTAGES } from '@/game/data/voltages';
+import { getVoltage, isVoltageUnlocked, voltageUnlockRequirement, VOLTAGES } from '@/game/data/voltages';
 
 const ARROW = require('@/assets/images/menu/arrow.png');
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
@@ -80,8 +80,10 @@ export default function MilestonesScreen() {
   const [tier, setTier] = useState(1);
   const voltage = getVoltage(tier);
   const highest = highestWaveByVoltage[tier] ?? 0;
+  const unlocked = isVoltageUnlocked(tier, highestWaveByVoltage);
+  const req = voltageUnlockRequirement(tier);
   const canPrev = tier > 1;
-  const canNext = tier < VOLTAGES.length && isVoltageUnlocked(tier + 1, highestWaveByVoltage);
+  const canNext = tier < VOLTAGES.length;
 
   return (
     <ScrollView
@@ -96,7 +98,12 @@ export default function MilestonesScreen() {
         <Pressable hitSlop={12} disabled={!canPrev} onPress={() => setTier((t) => t - 1)}>
           <Image source={ARROW} style={[styles.arrow, !canPrev && styles.arrowDim]} contentFit="contain" />
         </Pressable>
-        <Text style={styles.voltage}>{voltage.name}</Text>
+        <View style={styles.pagerLabel}>
+          <Text style={[styles.voltage, !unlocked && styles.voltageLocked]}>{voltage.name}</Text>
+          {!unlocked && req && (
+            <Text style={styles.lockHint}>Reach wave {req.wave} on Voltage {req.prevTier}</Text>
+          )}
+        </View>
         <Pressable hitSlop={12} disabled={!canNext} onPress={() => setTier((t) => t + 1)}>
           <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !canNext && styles.arrowDim]} contentFit="contain" />
         </Pressable>
@@ -157,12 +164,22 @@ const styles = StyleSheet.create({
     gap: 16,
     marginTop: 10,
   },
+  pagerLabel: { alignItems: 'center', maxWidth: '64%' },
   voltage: {
     fontFamily: Fonts.grenzeSemiBold,
     fontSize: 20,
     color: MenuColors.text,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  voltageLocked: { opacity: 0.5 },
+  lockHint: {
+    fontFamily: Fonts.grenzeSemiBold,
+    fontSize: 11,
+    color: MenuColors.accentBright,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    marginTop: 2,
   },
   arrow: { width: 20, height: 17 },
   arrowFlip: { transform: [{ scaleX: -1 }] },

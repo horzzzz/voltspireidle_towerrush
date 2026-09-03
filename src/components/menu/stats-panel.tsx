@@ -11,6 +11,12 @@ type StatsPanelProps = {
   multiplier?: string;
   scrapPerHour?: string;
   highest?: string;
+  /** Renders the tier as not-yet-unlocked: name dimmed, `lockHint` shown, stats replaced by "Locked". */
+  locked?: boolean;
+  /** One-line unlock condition shown under the tier name when `locked` (e.g. "Reach wave 100 on Voltage 1"). */
+  lockHint?: string;
+  /** Whether to show the "Best scrap farm" / "Scrap/hr" readout — Voltage 1 only; higher tiers aren't for idling. */
+  showScrapFarm?: boolean;
   onPrev?: () => void;
   onNext?: () => void;
 };
@@ -21,6 +27,9 @@ export function StatsPanel({
   multiplier = 'x1',
   scrapPerHour = '783.37',
   highest = '8',
+  locked = false,
+  lockHint,
+  showScrapFarm = true,
   onPrev,
   onNext,
 }: StatsPanelProps) {
@@ -31,7 +40,7 @@ export function StatsPanel({
       <View style={[StyleSheet.absoluteFill, styles.content]}>
         <View style={styles.rowTop}>
           <Text style={styles.label}>Voltage</Text>
-          <Text style={styles.labelAccent}>Best scrap farm</Text>
+          {showScrapFarm && !locked && <Text style={styles.labelAccent}>Best scrap farm</Text>}
         </View>
 
         <View style={styles.rowMid}>
@@ -39,8 +48,12 @@ export function StatsPanel({
             <Image source={ARROW} style={[styles.arrow, !onPrev && styles.arrowDim]} contentFit="contain" />
           </Pressable>
           <View style={styles.tierBox}>
-            <Text style={styles.tier}>{tier}</Text>
-            <Text style={styles.mult}>{multiplier}</Text>
+            <Text style={[styles.tier, locked && styles.tierLocked]}>{tier}</Text>
+            {locked ? (
+              <Text style={styles.lockHint}>{lockHint}</Text>
+            ) : (
+              <Text style={styles.mult}>{multiplier}</Text>
+            )}
           </View>
           <Pressable onPress={onNext} disabled={!onNext} hitSlop={12}>
             <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !onNext && styles.arrowDim]} contentFit="contain" />
@@ -48,8 +61,14 @@ export function StatsPanel({
         </View>
 
         <View style={styles.rowBot}>
-          <Text style={styles.small}>Scrap/hr {scrapPerHour}</Text>
-          <Text style={styles.small}>Highest reached {highest}</Text>
+          {locked ? (
+            <Text style={styles.small}>Locked</Text>
+          ) : (
+            <>
+              {showScrapFarm && <Text style={styles.small}>Scrap/hr {scrapPerHour}</Text>}
+              <Text style={styles.small}>Highest reached {highest}</Text>
+            </>
+          )}
         </View>
       </View>
     </View>
@@ -114,6 +133,15 @@ const styles = StyleSheet.create({
     lineHeight: 9,
     color: MenuColors.text,
     textTransform: 'uppercase',
+  },
+  tierLocked: { opacity: 0.5 },
+  lockHint: {
+    fontFamily: Fonts.grenzeSemiBold,
+    fontSize: 8,
+    lineHeight: 9,
+    color: MenuColors.accentBright,
+    textTransform: 'uppercase',
+    textAlign: 'center',
   },
   small: {
     fontFamily: Fonts.grenzeRegular,
