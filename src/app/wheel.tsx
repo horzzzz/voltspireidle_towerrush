@@ -1,16 +1,26 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Easing, runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { LuckWheel } from '@/components/wheel/luck-wheel';
 import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, WHEEL_SECTOR_DEGREES } from '@/game/data/wheel';
+import { useFxStore } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const PILL = require('@/assets/images/ui/pill-button.png');
@@ -41,12 +51,24 @@ function sectorLabel(sector: (typeof WHEEL_SECTORS)[number]): string {
   return `+${sector.amount} ${sector.kind === 'gems' ? 'gems' : 'scrap'}`;
 }
 
+/**
+ * How big a deal the prize is, 1 = the smallest win. Above ~1.5 the burst
+ * upgrades itself to the full treatment (light rays + screen flash), so the
+ * rare 100-scrap and 20-gem wedges actually feel different from a 10-gem one.
+ */
+function sectorPower(sector: (typeof WHEEL_SECTORS)[number]): number {
+  if (sector.kind === 'gems') return sector.amount >= 20 ? 2.2 : sector.amount >= 15 ? 1.6 : 1.2;
+  if (sector.kind === 'scrap') return sector.amount >= 100 ? 2.2 : 1.4;
+  return 1.5;
+}
+
 /** Wheel of Luck (Figma nodes 1:1473 / 1:1492). */
 export default function WheelScreen() {
   const insets = useSafeAreaInsets();
   const rotation = useSharedValue(0);
   const [spinning, setSpinning] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<{ sector: (typeof WHEEL_SECTORS)[number] } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const scrap = useMetaStore((s) => s.scrap);
@@ -54,6 +76,23 @@ export default function WheelScreen() {
   const wheel = useMetaStore((s) => s.wheel);
   const clockHighWater = useMetaStore((s) => s.clockHighWater);
   const spinWheel = useMetaStore((s) => s.spinWheel);
+  const claimWheelReward = useMetaStore((s) => s.claimWheelReward);
+
+  // Where the wheel actually sits on screen, so a win's burst originates from
+  // the hub rather than from an arbitrary corner.
+  const wheelRef = useRef<View>(null);
+  const wheelCenter = useRef({ x: 0, y: 0 });
+  const measureWheel = useCallback(() => {
+    wheelRef.current?.measureInWindow((x, y, width, height) => {
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        wheelCenter.current = { x: x + width / 2, y: y + height / 2 };
+      }
+    });
+  }, []);
+
+  const wheelShake = useSharedValue(0);
+  const resultScale = useSharedValue(0);
+
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -72,6 +111,7 @@ export default function WheelScreen() {
 
     setSpinning(true);
     setResultText(null);
+    setOutcome(null);
     const target = targetRotationForSector(rotation.value, outcome.sectorIndex);
     // `withTiming`'s completion callback runs on the UI thread (a worklet) —
     // `sectorLabel` is a plain JS function, so it must be called *inside* the
@@ -85,10 +125,62 @@ export default function WheelScreen() {
     rotation.value = withTiming(target, { duration: SPIN_MS, easing: Easing.out(Easing.cubic) }, finishSpin);
   };
 
+  // The spin's landing is published as state and reacted to in an effect,
+  // rather than animated straight from the callback: a fresh object identity
+  // is what re-fires the reaction, and it keeps every shared-value write on
+  // the one code path the React Compiler is happy to see them on.
   const applySpinResult = (sector: (typeof WHEEL_SECTORS)[number]) => {
     setSpinning(false);
     setResultText(sectorLabel(sector));
+    setOutcome({ sector });
   };
+
+  useEffect(() => {
+    if (outcome === null) {
+      resultScale.value = 0;
+      return;
+    }
+
+    const { sector } = outcome;
+    resultScale.value = withSequence(
+      withTiming(1.3, { duration: 150, easing: Easing.out(Easing.cubic) }),
+      withSpring(1, { damping: 8, stiffness: 200 }),
+    );
+
+    // The wheel has actually stopped now — this is the moment the prize
+    // (scrap/gems/an extra free spin) actually lands in the player's meta
+    // state, not back when they tapped the button.
+    claimWheelReward(sector);
+
+    const { anchors, burst } = useFxStore.getState();
+    const from = wheelCenter.current;
+
+    if (sector.kind === 'fail') {
+      // No prize — the wheel just sags and shudders.
+      burst({ kind: 'fail', from });
+      wheelShake.value = withSequence(
+        withTiming(-7, { duration: 55 }),
+        withTiming(6, { duration: 55 }),
+        withTiming(-4, { duration: 55 }),
+        withTiming(0, { duration: 70 }),
+      );
+      return;
+    }
+
+    const power = sectorPower(sector);
+    if (sector.kind === 'gems') burst({ kind: 'gems', from, to: anchors.gems ?? null, power });
+    else if (sector.kind === 'scrap') burst({ kind: 'scrap', from, to: anchors.scrap ?? null, power });
+    else burst({ kind: 'charge', from, to: null, power });
+  }, [outcome, resultScale, wheelShake, claimWheelReward]);
+
+  // Declared after every write to the shared values above: the React Compiler
+  // freezes a value the moment it is captured by a hook, so a `useAnimatedStyle`
+  // placed earlier would make each `.value =` below it an error.
+  const wheelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: wheelShake.value }] }));
+  const resultStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, resultScale.value),
+    transform: [{ scale: resultScale.value }],
+  }));
 
   return (
     <View style={styles.container}>
@@ -104,12 +196,14 @@ export default function WheelScreen() {
 
         <Text style={styles.title}>Wheel of luck</Text>
 
-        <View style={styles.wheelWrap}>
-          <LuckWheel rotation={rotation} />
-        </View>
+        <Animated.View ref={wheelRef} onLayout={measureWheel} style={[styles.wheelWrap, wheelStyle]}>
+          <LuckWheel rotation={rotation} spinning={spinning} />
+        </Animated.View>
 
         <View style={styles.footer}>
-          {resultText && !spinning && <Text style={styles.resultText}>{resultText}</Text>}
+          {resultText && !spinning && (
+            <Animated.Text style={[styles.resultText, resultStyle]}>{resultText}</Animated.Text>
+          )}
           {wheel.freeSpins > 0 && <Text style={styles.timer}>{wheel.freeSpins} free spin(s) available</Text>}
           {onCooldown && <Text style={styles.timer}>Next spin in {formatCountdown(cooldownRemaining)}</Text>}
 
@@ -131,6 +225,8 @@ export default function WheelScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <RewardOverlay />
     </View>
   );
 }

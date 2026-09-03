@@ -1,8 +1,10 @@
 import { Image } from 'expo-image';
+import { useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PriceTag } from '@/components/upgrades/price-tag';
 import { Fonts, MenuColors } from '@/constants/theme';
+import { burstFrom } from '@/game/state/fx-store';
 
 const ICONS = {
   attack: require('@/assets/images/ui/icon-attack.png'),
@@ -22,14 +24,20 @@ type UpgradeRowProps = {
   maxed?: boolean;
   /** True when the player can't afford it right now — dims the row without hiding it. */
   disabled?: boolean;
-  onBuy?: () => void;
+  /** Return `false` to suppress the level-up burst (e.g. the purchase was refused). */
+  onBuy?: () => boolean | void;
 };
 
 /** A single buyable stat upgrade (Figma node 1:420). */
 export function UpgradeRow({ category, name, from, to, price, maxed, disabled, onBuy }: UpgradeRowProps) {
+  const rowRef = useRef<View>(null);
   return (
     <Pressable
-      onPress={onBuy}
+      ref={rowRef}
+      onPress={() => {
+        if (onBuy?.() === false) return;
+        burstFrom(rowRef.current, 'levelUp');
+      }}
       disabled={maxed || disabled}
       style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && !disabled && styles.pressed]}>
       <Image source={ICONS[category]} style={styles.icon} contentFit="contain" />

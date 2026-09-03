@@ -6,7 +6,7 @@ import { ATTACK_RANGE, TOWER_BODY_RADIUS, TOWER_X, TOWER_Y } from '@/game/data/a
 import { useBattleStore } from '@/game/state/battle-store';
 
 /** Sits between the tower art and the dashed attack-range ring — clear of both. */
-const RING_RADIUS = (TOWER_BODY_RADIUS + ATTACK_RANGE) / 2;
+export const RING_RADIUS = (TOWER_BODY_RADIUS + ATTACK_RANGE) / 2;
 const STROKE_WIDTH = 5;
 
 function ringColor(fraction: number): string {

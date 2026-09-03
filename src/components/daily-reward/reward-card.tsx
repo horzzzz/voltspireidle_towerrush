@@ -1,5 +1,13 @@
 import { Image } from 'expo-image';
+import { useEffect, type Ref } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 
@@ -26,19 +34,33 @@ type RewardCardProps = {
   active?: boolean;
   /** Already claimed (or cycled past) — dimmed. */
   past?: boolean;
+  /** Lets the screen measure this card, so a claim burst can start from it. */
+  ref?: Ref<View>;
 };
 
 /** One day's reward tile in the 3x2 grid (Figma node 1:84 etc). */
-export function RewardCard({ day, amount, icon, active, past }: RewardCardProps) {
+export function RewardCard({ day, amount, icon, active, past, ref }: RewardCardProps) {
   const { width } = useWindowDimensions();
   const row = Math.min(width, MenuMaxWidth) - SCREEN_PADDING * 2;
   const cardW = (row - GAP * 2) / 3;
   const cardH = cardW / CARD_RATIO;
 
+  // Today's card breathes, so the one thing worth tapping is the one thing
+  // moving on an otherwise static grid.
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    if (!active) {
+      pulse.value = 0;
+      return;
+    }
+    pulse.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
+  }, [active, pulse]);
+  const ringStyle = useAnimatedStyle(() => ({ opacity: 0.45 + pulse.value * 0.55 }));
+
   return (
-    <View style={[{ width: cardW, height: cardH }, past && styles.past]}>
+    <View ref={ref} style={[{ width: cardW, height: cardH }, past && styles.past]}>
       <Image source={CARD_BG} style={StyleSheet.absoluteFill} contentFit="fill" />
-      {active && <View style={styles.activeRing} />}
+      {active && <Animated.View style={[styles.activeRing, ringStyle]} />}
       <View style={[StyleSheet.absoluteFill, styles.content]}>
         <Image source={ICONS[icon]} style={styles.icon} contentFit="contain" />
         <Text style={styles.day}>Day {day}</Text>

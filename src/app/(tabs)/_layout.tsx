@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { BottomNav } from '@/components/menu/bottom-nav';
 import { MenuColors, MenuMaxWidth } from '@/constants/theme';
@@ -32,6 +33,10 @@ export default function TabsLayout() {
           <BottomNav />
         </View>
       </SafeAreaView>
+
+      {/* One overlay for every tab screen — claim bursts from Milestones,
+          Missions and Coilworks all draw through it. */}
+      <RewardOverlay />
 
       <TabList style={{ display: 'none' }}>
         <TabTrigger name="game" href="/" />

@@ -1,4 +1,5 @@
 import { isUpgradeMaxed, UPGRADE_DEFS, upgradeCost, upgradeValue } from '../data/tower-stats';
+import { emitVfx } from './types';
 import type { UpgradeId, WorldState } from './types';
 
 export type BuyUpgradeResult = 'bought' | 'maxed' | 'too-expensive' | 'locked';
@@ -34,6 +35,7 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
     world.tower.health += delta;
   }
 
+  emitVfx(world, { type: 'upgrade' });
   return 'bought';
 }
 

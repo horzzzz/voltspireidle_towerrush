@@ -1,13 +1,16 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { RewardCard } from '@/components/daily-reward/reward-card';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { dailyRewardForDay } from '@/game/data/daily';
 import { dayKey, effectiveNow } from '@/game/economy/clock';
+import { burstFrom } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const TITLE = require('@/assets/images/daily-reward/title.png');
@@ -42,6 +45,10 @@ export default function DailyRewardScreen() {
   // climbing past day 7, but the ladder art only has one cycle to show.
   const cyclePos = ((nextDay - 1) % 7) + 1;
 
+  // The burst comes out of the card being claimed, so the gems visibly leave
+  // today's tile rather than materialising in the counter.
+  const activeCardRef = useRef<View>(null);
+
   return (
     <View style={styles.container}>
       <SplashBackground />
@@ -75,6 +82,7 @@ export default function DailyRewardScreen() {
                 {row.map((day) => (
                   <RewardCard
                     key={day}
+                    ref={day === cyclePos ? activeCardRef : undefined}
                     day={day}
                     amount={String(dailyRewardForDay(day))}
                     icon="gem"
@@ -99,7 +107,11 @@ export default function DailyRewardScreen() {
 
           <Pressable
             onPress={() => {
-              if (claimDaily()) close();
+              if (!claimDaily()) return;
+              // Day 7 is the payout the ladder builds to — give it the works.
+              burstFrom(activeCardRef.current, nextDay % 7 === 0 ? 'jackpot' : 'gems', nextDay % 7 === 0 ? 2.2 : 1.4);
+              // Let the burst read before the modal slides away.
+              setTimeout(close, 620);
             }}
             disabled={alreadyClaimedToday}
             style={({ pressed }) => [
@@ -112,6 +124,8 @@ export default function DailyRewardScreen() {
           </Pressable>
         </ScrollView>
       </View>
+
+      <RewardOverlay />
     </View>
   );
 }

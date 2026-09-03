@@ -9,6 +9,7 @@ import {
 } from '../../data/enemies';
 import { getWaveConfig, type WaveConfig } from '../../data/waves';
 import { scrapRewardForKill } from '../formulas';
+import { emitVfx } from '../types';
 import type { Enemy, SpawnEntry, WorldState } from '../types';
 import type { Rng } from '../rng';
 
@@ -60,6 +61,8 @@ export function startWave(world: WorldState, wave: number): void {
   world.spawnQueue.push(...batch);
   world.waveSpawnTotal = batch.length;
   world.spawnTimer = 0;
+
+  emitVfx(world, { type: 'waveStart', wave, isBoss: config.isBoss });
 }
 
 /** Entries of the *current* wave still waiting to spawn — the HUD bar's numerator. */
@@ -143,6 +146,12 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
     inContact: false,
     bossVariant: entry.isBoss ? pickBossVariant(config.wave) : 0,
     dropsGem: entry.dropsGem ?? false,
+    hitFlash: 0,
+    age: 0,
   };
   world.enemies.push(enemy);
+
+  // No `spawn` VFX event — most spawns happen off-screen (past the arena
+  // edge, see raySpawnPoint), so a burst there was wasted work for no
+  // payoff. The event type stays available in VfxEvent for later use.
 }

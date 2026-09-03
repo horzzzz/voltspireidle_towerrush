@@ -1,10 +1,10 @@
-import { Atlas, Skia, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
-import { useMemo } from 'react';
+import { Atlas, Skia, useColorBuffer, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
+import { memo, useMemo } from 'react';
 import type { SharedValue } from 'react-native-reanimated';
 
 import { ENEMY_BASE_RADIUS } from '@/game/data/arena';
 import type { EnemyKind } from '@/game/core/types';
-import { FIELDS_PER_SLOT, MAX_BOSS, MAX_PER_KIND } from './enemy-buffers';
+import { FIELDS_PER_SLOT, HIT_FLASH_OFFSET, MAX_BOSS, MAX_PER_KIND } from './enemy-buffers';
 
 /** On-screen diameter, in design px, for a kind-1.0-scale enemy. */
 const BASE_DIAMETER = ENEMY_BASE_RADIUS * 2;
@@ -52,7 +52,7 @@ type Props = {
   kind?: EnemyKind;
   /** When set, draw the dedicated boss sprite for this variant instead. */
   bossVariant?: number;
-  /** Packed [x, y, finalScale, dirX, dirY] × capacity, refreshed every sim tick. */
+  /** Packed [x, y, finalScale, dirX, dirY, hitFlash] × capacity, refreshed every frame. */
   buffer: SharedValue<Float32Array>;
 };
 
@@ -61,7 +61,17 @@ type Props = {
  * instance in one GPU draw call, regardless of how many are alive. A boss is
  * just a different source + a larger `finalScale`, not a separate draw path.
  */
-export function EnemyAtlas({ kind, bossVariant, buffer }: Props) {
+/**
+ * Memoized: its `buffer` prop is a stable SharedValue for the whole battle's
+ * lifetime (see use-battle-engine.ts), so without this the component — and
+ * every `useRSXformBuffer`/`useColorBuffer` mapper it registers — would
+ * re-run on every one of `BattleCanvas`'s ~10Hz re-renders for no reason.
+ * With 6 of these on screen at once that churn is real: each buffer hook
+ * re-registers its Reanimated mapper (and, in dev, logs a strict-mode
+ * warning) from the render body every single time, so unmemoized this can
+ * flood the JS thread badly enough to stall the sim's own rAF loop.
+ */
+export const EnemyAtlas = memo(function EnemyAtlas({ kind, bossVariant, buffer }: Props) {
   const isBoss = bossVariant != null;
   const bossSrc = isBoss ? BOSS_SOURCES[bossVariant] : null;
   const src = bossSrc ?? SOURCES[kind ?? 'scavenger'];
@@ -98,7 +108,23 @@ export function EnemyAtlas({ kind, bossVariant, buffer }: Props) {
     val.set(scos, ssin, x - (scos * cx - ssin * cy), y - (ssin * cx + scos * cy));
   });
 
+  // Per-instance white flash on hit. `screen` brightens toward white without
+  // being able to push a channel past 1 (which a `plus` blend would), and a
+  // zero colour is a no-op under it — so an un-hit enemy draws exactly as
+  // before and a just-hit one lights up for a fraction of a second. That is
+  // what makes a shot land on a *specific* body in a crowded swarm.
+  const colors = useColorBuffer(capacity, (val, i) => {
+    'worklet';
+    const flash = buffer.value[i * FIELDS_PER_SLOT + HIT_FLASH_OFFSET] * 0.85;
+    val[0] = flash;
+    val[1] = flash;
+    val[2] = flash;
+    val[3] = 0;
+  });
+
   if (!image) return null;
 
-  return <Atlas image={image} sprites={sprites} transforms={transforms} />;
-}
+  return (
+    <Atlas image={image} sprites={sprites} transforms={transforms} colors={colors} colorBlendMode="screen" />
+  );
+});

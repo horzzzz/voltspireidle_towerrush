@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
@@ -7,6 +7,7 @@ import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { DAILY_MISSION_REWARD, WEEKLY_LADDER, missionLabel } from '@/game/data/missions';
+import { burstFrom } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
 import type { MissionInstance } from '@/game/economy/missions';
 
@@ -57,10 +58,11 @@ function MiniButton({
   );
 }
 
-function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () => void }) {
+function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () => boolean }) {
   const claimable = mission.current >= mission.target && !mission.claimed;
+  const rowRef = useRef<View>(null);
   return (
-    <View style={styles.row}>
+    <View ref={rowRef} style={styles.row}>
       <View style={styles.rowMain}>
         <Text style={styles.missionLabel} numberOfLines={1}>
           {missionLabel(mission.type, mission.target)}{' '}
@@ -74,11 +76,54 @@ function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () 
         </View>
       </View>
       <View style={styles.rowButtons}>
-        <MiniButton label={mission.claimed ? 'Claimed' : 'Claim'} disabled={!claimable} onPress={onClaim} />
+        <MiniButton
+          label={mission.claimed ? 'Claimed' : 'Claim'}
+          disabled={!claimable}
+          onPress={() => {
+            if (!onClaim()) return;
+            burstFrom(rowRef.current, 'gems');
+            burstFrom(rowRef.current, 'scrap');
+          }}
+        />
         {/* TODO(ads): rewarded video re-rolls this mission for a new template/target. Inert until ads are wired up. */}
         {ADS_ENABLED && <MiniButton label="Reroll" icon={VIDEO_ICON} disabled={mission.claimed} />}
       </View>
     </View>
+  );
+}
+
+function WeeklyRow({
+  tier,
+  claimed,
+  claimable,
+  divider,
+  onClaim,
+}: {
+  tier: (typeof WEEKLY_LADDER)[number];
+  claimed: boolean;
+  claimable: boolean;
+  divider: boolean;
+  onClaim: () => boolean;
+}) {
+  const rowRef = useRef<View>(null);
+  return (
+    <Pressable
+      ref={rowRef}
+      disabled={!claimable}
+      onPress={() => {
+        if (!onClaim()) return;
+        burstFrom(rowRef.current, 'gems', 1.4);
+        burstFrom(rowRef.current, 'scrap', 1.4);
+      }}
+      style={[styles.weeklyRow, divider && styles.weeklyDivider]}>
+      <Text style={[styles.weeklyMult, !claimable && !claimed && styles.dim]}>
+        {tier.completions}
+        <Text style={styles.weeklyMultX}>x</Text>
+      </Text>
+      <RewardChips gems={tier.reward.gems} scrap={tier.reward.scrap} dim={!claimable && !claimed} />
+      {claimable && <Text style={styles.claim}>Claim</Text>}
+      {claimed && <Text style={styles.claimedText}>Claimed</Text>}
+    </Pressable>
   );
 }
 
@@ -127,19 +172,14 @@ export default function MissionsScreen() {
               const claimed = missions.weeklyClaimed.includes(i);
               const claimable = !claimed && missions.weeklyCompletions >= tier.completions;
               return (
-                <Pressable
+                <WeeklyRow
                   key={tier.completions}
-                  disabled={!claimable}
-                  onPress={() => claimWeeklyTier(i)}
-                  style={[styles.weeklyRow, i > 0 && styles.weeklyDivider]}>
-                  <Text style={[styles.weeklyMult, !claimable && !claimed && styles.dim]}>
-                    {tier.completions}
-                    <Text style={styles.weeklyMultX}>x</Text>
-                  </Text>
-                  <RewardChips gems={tier.reward.gems} scrap={tier.reward.scrap} dim={!claimable && !claimed} />
-                  {claimable && <Text style={styles.claim}>Claim</Text>}
-                  {claimed && <Text style={styles.claimedText}>Claimed</Text>}
-                </Pressable>
+                  tier={tier}
+                  claimed={claimed}
+                  claimable={claimable}
+                  divider={i > 0}
+                  onClaim={() => claimWeeklyTier(i)}
+                />
               );
             })}
           </View>

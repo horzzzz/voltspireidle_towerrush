@@ -11,7 +11,11 @@ import {
   getTowerScrapBonus,
 } from '../../data/tower-stats';
 import { towerIncomingDamage } from '../formulas';
+import { emitVfx } from '../types';
 import type { Enemy, WorldState } from '../types';
+
+/** How long an enemy stays lit up after taking a hit — see `Enemy.hitFlash`. */
+const HIT_FLASH_SECONDS = 0.12;
 
 function findNearestTarget(world: WorldState): Enemy | null {
   let best: Enemy | null = null;
@@ -35,7 +39,7 @@ function findNearestTarget(world: WorldState): Enemy | null {
  * visibly poke past the dashed circle, so clamp the endpoint to the ring
  * itself: the bolt always terminates on or inside ATTACK_RANGE.
  */
-function spawnBolt(world: WorldState, targetX: number, targetY: number): void {
+function emitBolt(world: WorldState, targetX: number, targetY: number, isCrit: boolean): void {
   const dx = targetX - TOWER_X;
   const dy = targetY - TOWER_Y;
   const dist = Math.hypot(dx, dy);
@@ -43,33 +47,7 @@ function spawnBolt(world: WorldState, targetX: number, targetY: number): void {
   const x2 = dist > 0 ? TOWER_X + (dx / dist) * reach : TOWER_X;
   const y2 = dist > 0 ? TOWER_Y + (dy / dist) * reach : TOWER_Y;
 
-  world.bolts.push({
-    id: world.nextEffectId++,
-    x1: TOWER_X,
-    y1: TOWER_Y,
-    x2,
-    y2,
-    spawnedAt: world.time,
-  });
-}
-
-function spawnDamagePopup(
-  world: WorldState,
-  x: number,
-  y: number,
-  amount: number,
-  isBoss: boolean,
-  isCrit: boolean,
-): void {
-  world.damagePopups.push({
-    id: world.nextEffectId++,
-    x,
-    y,
-    amount,
-    isBoss,
-    isCrit,
-    spawnedAt: world.time,
-  });
+  emitVfx(world, { type: 'bolt', x1: TOWER_X, y1: TOWER_Y, x2, y2, isCrit });
 }
 
 /**
@@ -86,11 +64,43 @@ function killEnemy(world: WorldState, enemy: Enemy): void {
   if (enemy.isBoss) world.bossKills += 1;
   if (enemy.dropsGem) world.gemsCollected += 1;
   enemy.hp = 0;
+
+  emitVfx(world, {
+    type: 'kill',
+    x: enemy.x,
+    y: enemy.y,
+    radius: enemy.radius,
+    kind: enemy.kind,
+    isBoss: enemy.isBoss,
+    bossVariant: enemy.bossVariant,
+    dropsGem: enemy.dropsGem,
+  });
 }
 
 function applyDamage(world: WorldState, enemy: Enemy, amount: number, isCrit: boolean): void {
   enemy.hp -= amount;
-  spawnDamagePopup(world, enemy.x, enemy.y, amount, enemy.isBoss, isCrit);
+  enemy.hitFlash = 1;
+
+  // Direction the shot arrived along — sparks spray outward from the tower,
+  // which is what sells the hit as coming *from* somewhere.
+  const dx = enemy.x - TOWER_X;
+  const dy = enemy.y - TOWER_Y;
+  const dist = Math.hypot(dx, dy);
+  const dirX = dist > 0 ? dx / dist : 0;
+  const dirY = dist > 0 ? dy / dist : 1;
+
+  emitVfx(world, {
+    type: 'hit',
+    x: enemy.x,
+    y: enemy.y,
+    dirX,
+    dirY,
+    radius: enemy.radius,
+    isCrit,
+    isBoss: enemy.isBoss,
+  });
+  emitVfx(world, { type: 'damage', x: enemy.x, y: enemy.y, amount, isCrit, isBoss: enemy.isBoss });
+
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
@@ -105,8 +115,8 @@ export function updateTowerAttack(world: WorldState, dt: number): void {
   const baseDamage = getTowerDamage(world.tower.levels, world.loadout);
   const isCrit = world.rng.next() < getTowerCritChance(world.tower.levels, world.loadout);
   const damage = isCrit ? baseDamage * getTowerCritMultiplier(world.tower.levels, world.loadout) : baseDamage;
+  emitBolt(world, target.x, target.y, isCrit);
   applyDamage(world, target, damage, isCrit);
-  spawnBolt(world, target.x, target.y);
 
   const attackSpeed = getTowerAttackSpeed(world.tower.levels, world.loadout);
   world.tower.attackCooldown = 1 / attackSpeed;
@@ -121,23 +131,49 @@ export function updateContactDamage(world: WorldState, dt: number): void {
     enemy.attackCooldown -= dt;
     if (enemy.attackCooldown > 0) continue;
 
-    world.tower.health -= towerIncomingDamage(enemy.contactDamage, armor, deflection);
+    const dealt = towerIncomingDamage(enemy.contactDamage, armor, deflection);
+    world.tower.health -= dealt;
     enemy.attackCooldown = ENEMY_ATTACK_INTERVAL;
+
+    // Points from the attacker back at the tower — the slash/spark plays on
+    // the tower's shell, not inside the enemy body.
+    const dx = TOWER_X - enemy.x;
+    const dy = TOWER_Y - enemy.y;
+    const dist = Math.hypot(dx, dy);
+    emitVfx(world, {
+      type: 'towerHit',
+      x: enemy.x,
+      y: enemy.y,
+      dirX: dist > 0 ? dx / dist : 0,
+      dirY: dist > 0 ? dy / dist : -1,
+      amount: dealt,
+    });
+  }
+}
+
+/**
+ * Purely cosmetic per-enemy countdowns: the white hit flash and the age that
+ * drives the spawn warp-in. Kept out of `updateMovement` so that system stays
+ * about movement, and out of the render layer so a paused/backgrounded frame
+ * can't desync them from the sim clock they belong to.
+ */
+export function advanceEnemyTimers(world: WorldState, dt: number): void {
+  const flashStep = dt / HIT_FLASH_SECONDS;
+  for (const enemy of world.enemies) {
+    enemy.age += dt;
+    if (enemy.hitFlash > 0) enemy.hitFlash = Math.max(0, enemy.hitFlash - flashStep);
   }
 }
 
 /**
  * Drops dead enemies — run once per tick.
  *
- * Bolts and damage popups are deliberately NOT time-pruned here anymore.
- * The sim runs at 60Hz but the HUD only sees a throttled ~10Hz snapshot
- * (see battle-store's publish) — pruning by age on the sim's own clock
- * raced that snapshot: a bolt with a short TTL could expire and get
- * filtered out before a delayed publish (a dropped frame, GC pause) ever
- * captured it, so a real hit — sometimes the killing blow — silently never
- * showed a beam. Effects now accumulate in `world.bolts`/`damagePopups`
- * until use-battle-engine drains them right after each publish, so every
- * effect is guaranteed to appear in exactly one snapshot, never raced away.
+ * Effects are no longer time-pruned here, and no longer live on the world at
+ * all beyond a single frame: everything visual is emitted as a `VfxEvent`
+ * (see core/types.ts) into `world.vfx`, which the render layer drains every
+ * frame — not at the throttled ~10Hz HUD publish rate the old bolt/popup
+ * arrays were tied to. That is what lets an effect be *animated* rather than
+ * flashed for exactly one snapshot.
  */
 export function pruneCombatState(world: WorldState): void {
   if (world.enemies.some((e) => e.hp <= 0)) {

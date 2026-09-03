@@ -51,6 +51,14 @@ export interface Enemy {
   bossVariant: number;
   /** True for exactly one enemy every GEM_WAVE_INTERVAL waves — see spawn.ts. */
   dropsGem: boolean;
+  /**
+   * Seconds of "just got hit" left on this enemy, counted down by combat.ts.
+   * Render-only: the enemy atlas tints the sprite toward white by it, which
+   * is what makes a shot visibly land on a specific body in the swarm.
+   */
+  hitFlash: number;
+  /** Seconds this enemy has been alive — drives the warp-in scale-up. */
+  age: number;
 }
 
 /** One entry in a wave's drip-fed spawn queue. */
@@ -61,24 +69,46 @@ export interface SpawnEntry {
   dropsGem?: boolean;
 }
 
-export interface DamagePopup {
-  id: number;
-  x: number;
-  y: number;
-  amount: number;
-  isBoss: boolean;
-  isCrit: boolean;
-  /** `world.time` when this popup was created — render layer ages it out. */
-  spawnedAt: number;
-}
+/**
+ * One thing that just happened and is worth showing. The sim emits these and
+ * knows nothing about how (or whether) they get drawn — the render layer's
+ * VFX system (src/game/vfx) drains the queue every frame and turns each one
+ * into particles, beams, numbers and rings.
+ *
+ * Deliberately plain data with no ids and no timestamps: an event is consumed
+ * exactly once, the moment it is drained, so nothing here needs to survive or
+ * be matched up across frames.
+ */
+export type VfxEvent =
+  /** Tower shot a target. Endpoint is already clamped to the attack ring. */
+  | { type: 'bolt'; x1: number; y1: number; x2: number; y2: number; isCrit: boolean }
+  /** A shot connected: `dirX/dirY` is the unit vector the bolt arrived along. */
+  | { type: 'hit'; x: number; y: number; dirX: number; dirY: number; radius: number; isCrit: boolean; isBoss: boolean }
+  /** Floating damage number. */
+  | { type: 'damage'; x: number; y: number; amount: number; isCrit: boolean; isBoss: boolean }
+  /** An enemy died. `kind` picks the debris palette. */
+  | { type: 'kill'; x: number; y: number; radius: number; kind: EnemyKind; isBoss: boolean; bossVariant: number; dropsGem: boolean }
+  /** An enemy walked into view — drives the warp-in ring. */
+  | { type: 'spawn'; x: number; y: number; radius: number; isBoss: boolean }
+  /** The tower took a contact hit from an enemy standing at `x, y`. */
+  | { type: 'towerHit'; x: number; y: number; dirX: number; dirY: number; amount: number }
+  /** A new wave's clock started. */
+  | { type: 'waveStart'; wave: number; isBoss: boolean }
+  /** An in-run upgrade was bought. */
+  | { type: 'upgrade' };
 
-export interface BoltEffect {
-  id: number;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  spawnedAt: number;
+/**
+ * Hard ceiling on the un-drained queue. In the app `use-battle-engine` drains
+ * it every frame so it never comes close; headless (scripts/battle-sim.ts)
+ * nothing drains it at all, and this is what keeps a 10-minute simulated run
+ * from accumulating hundreds of thousands of dead event objects.
+ */
+export const MAX_VFX_QUEUE = 512;
+
+/** Queues a VFX event, silently dropping it once the queue is saturated. */
+export function emitVfx(world: WorldState, event: VfxEvent): void {
+  if (world.vfx.length >= MAX_VFX_QUEUE) return;
+  world.vfx.push(event);
 }
 
 /**
@@ -267,9 +297,8 @@ export interface WorldState {
   upgradesBought: number;
 
   nextEnemyId: number;
-  nextEffectId: number;
-  damagePopups: DamagePopup[];
-  bolts: BoltEffect[];
+  /** Drained every frame by the render layer — see VfxEvent / emitVfx. */
+  vfx: VfxEvent[];
 
   result: RunSummary | null;
 }

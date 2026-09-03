@@ -5,14 +5,14 @@ import { createInitialUpgradeLevels, getTowerMaxHealth } from '../data/tower-sta
 import { waveProgressFraction } from '../core/formulas';
 import { waveEnemiesLeftToSpawn } from '../core/systems/spawn';
 import { defaultRunLoadout } from '../core/types';
-import type { BattlePhase, BoltEffect, DamagePopup, RunLoadout, RunSummary, UpgradeId, WorldState } from '../core/types';
+import type { BattlePhase, RunLoadout, RunSummary, UpgradeId, WorldState } from '../core/types';
 
 /**
  * React-facing mirror of the sim, refreshed at a throttled rate (see
- * use-battle-engine's PUBLISH_INTERVAL) — HUD text, upgrade bar, and the
- * (few, short-lived) bolt/popup effects all read from here. The 60fps path
- * — enemy positions — never touches this store; it goes straight from the
- * sim to Reanimated shared values, bypassing React entirely.
+ * use-battle-engine's PUBLISH_INTERVAL) — HUD text, the upgrade bar and the
+ * run-over overlay read from here. Neither of the 60fps paths touches this
+ * store: enemy positions and every VFX effect go straight from the sim to
+ * Reanimated shared values, bypassing React entirely.
  */
 export interface BattleSnapshot {
   phase: BattlePhase;
@@ -43,8 +43,6 @@ export interface BattleSnapshot {
   loadout: RunLoadout;
   speedMultiplier: number;
   result: RunSummary | null;
-  damagePopups: DamagePopup[];
-  bolts: BoltEffect[];
 }
 
 interface BattleStore extends BattleSnapshot {
@@ -67,8 +65,6 @@ const INITIAL: BattleSnapshot = {
   loadout: defaultRunLoadout(),
   speedMultiplier: 1,
   result: null,
-  damagePopups: [],
-  bolts: [],
 };
 
 export const useBattleStore = create<BattleStore>((set) => ({
@@ -106,8 +102,6 @@ export const useBattleStore = create<BattleStore>((set) => ({
       loadout: world.loadout,
       speedMultiplier: world.speedMultiplier,
       result: world.result,
-      damagePopups: world.damagePopups,
-      bolts: world.bolts,
     });
   },
 }));

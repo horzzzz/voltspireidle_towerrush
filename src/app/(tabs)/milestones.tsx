@@ -1,9 +1,10 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { burstFrom } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
 import { formatNumber } from '@/game/core/numbers';
 import { MILESTONES, milestoneKey } from '@/game/data/milestones';
@@ -39,14 +40,23 @@ function MilestoneRow({
   state: RowState;
   first: boolean;
   last: boolean;
-  onClaim: () => void;
+  /** Returns whether the claim actually paid out — nothing sparkles if it didn't. */
+  onClaim: () => boolean;
 }) {
   const reached = state !== 'locked';
+  const cardRef = useRef<View>(null);
   return (
     <View style={styles.row}>
       <Pressable
+        ref={cardRef}
         disabled={state !== 'claimable'}
-        onPress={onClaim}
+        onPress={() => {
+          if (!onClaim()) return;
+          // Both currencies fly out of the card that was tapped, each into its
+          // own counter — gems a beat behind scrap so they read as two payouts.
+          burstFrom(cardRef.current, 'scrap', 1.2);
+          burstFrom(cardRef.current, 'gems', 1.2);
+        }}
         style={({ pressed }) => [
           styles.card,
           reached ? styles.cardReached : styles.cardLocked,

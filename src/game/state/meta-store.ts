@@ -84,6 +84,8 @@ interface MetaState {
   claimWeeklyTier: (tierIndex: number) => boolean;
   claimDaily: () => boolean;
   spinWheel: () => WheelSpinResult | null;
+  /** Pays out the prize from a spin already consumed by `spinWheel` — called once the wheel visually stops. */
+  claimWheelReward: (sector: WheelSector) => void;
   selectVoltage: (tier: number) => boolean;
   /**
    * Spend `gemCost` gems to bank `scrapAmount` scrap (shop catalog).
@@ -267,16 +269,32 @@ export const useMetaStore = create<MetaState>()(
         const sectorIndex = rollWheelIndex();
         const sector = WHEEL_SECTORS[sectorIndex];
 
+        // Consumes the spin right away (cooldown reset / one free spin
+        // spent), so a second tap can't double-spin — but deliberately does
+        // NOT pay out the prize yet, including a won free spin. The wheel
+        // screen calls `claimWheelReward` once the wheel has actually
+        // stopped, so every part of the reward lands when the player sees
+        // the result, not the instant they tap the button.
         set((s) => ({
           ...withClockAdvance(now),
-          scrap: sector.kind === 'scrap' ? s.scrap + sector.amount : s.scrap,
-          gems: sector.kind === 'gems' ? s.gems + sector.amount : s.gems,
           wheel: {
             lastSpinAt: usingFreeSpin ? s.wheel.lastSpinAt : now,
-            freeSpins: (usingFreeSpin ? s.wheel.freeSpins - 1 : s.wheel.freeSpins) + (sector.kind === 'free_spin' ? sector.amount : 0),
+            freeSpins: usingFreeSpin ? s.wheel.freeSpins - 1 : s.wheel.freeSpins,
           },
         }));
         return { sectorIndex, sector };
+      },
+
+      claimWheelReward: (sector) => {
+        if (sector.kind === 'fail') return;
+        set((s) => ({
+          scrap: sector.kind === 'scrap' ? s.scrap + sector.amount : s.scrap,
+          gems: sector.kind === 'gems' ? s.gems + sector.amount : s.gems,
+          wheel:
+            sector.kind === 'free_spin'
+              ? { ...s.wheel, freeSpins: s.wheel.freeSpins + sector.amount }
+              : s.wheel,
+        }));
       },
 
       selectVoltage: (tier) => {

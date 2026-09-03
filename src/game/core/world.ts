@@ -6,7 +6,7 @@ import {
   getTowerMaxHealth,
 } from '../data/tower-stats';
 import { getWaveConfig } from '../data/waves';
-import { updateContactDamage, updateTowerAttack, pruneCombatState } from './systems/combat';
+import { advanceEnemyTimers, updateContactDamage, updateTowerAttack, pruneCombatState } from './systems/combat';
 import { updateMovement } from './systems/movement';
 import { startWave, updateSpawns, updateWaveClock } from './systems/spawn';
 import { endRun, updateTowerVitals } from './systems/tower';
@@ -57,9 +57,7 @@ export function createWorld(seed = Date.now(), loadout: RunLoadout = defaultRunL
     upgradesBought: 0,
 
     nextEnemyId: 1,
-    nextEffectId: 1,
-    damagePopups: [],
-    bolts: [],
+    vfx: [],
 
     result: null,
   };
@@ -80,6 +78,7 @@ export function tickWorld(world: WorldState, dt: number): void {
   updateMovement(world, dt);
   updateTowerAttack(world, dt);
   updateContactDamage(world, dt);
+  advanceEnemyTimers(world, dt);
   if (updateTowerVitals(world, dt)) {
     endRun(world, 'defeated');
     return;

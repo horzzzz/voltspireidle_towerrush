@@ -1,6 +1,15 @@
 import { Image } from 'expo-image';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { ADS_ENABLED } from '@/constants/features';
 import { BattleColors, Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
@@ -14,6 +23,40 @@ const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
 const VIDEO_ICON = require('@/assets/images/menu/icon-video.png');
 
 const noop = () => {};
+
+/** How long the stat counters take to roll up to their final value. */
+const COUNT_UP_MS = 850;
+
+/**
+ * Rolls a number up from zero on mount. A run's numbers are the only thing
+ * this screen is about, so they arrive rather than simply being there.
+ *
+ * Plain React state on a rAF rather than a Reanimated value: the output is
+ * text that has to go through `formatNumber`, which means a re-render either
+ * way, and ~50 of them over less than a second on a screen with nothing else
+ * happening is not worth a worklet-side text node to avoid.
+ */
+function useCountUp(target: number): number {
+  const [value, setValue] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / COUNT_UP_MS);
+      // Ease-out, so it sprints and then settles onto the real figure.
+      setValue(target * (1 - (1 - t) ** 3));
+      if (t < 1) rafRef.current = requestAnimationFrame(step);
+      else setValue(target);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target]);
+
+  return value;
+}
 
 type GameOverProps = {
   result: RunSummary | null;
@@ -49,28 +92,63 @@ export function GameOver({ result, onRestart, onExit }: GameOverProps) {
     return () => sub.remove();
   }, [visible, onExit]);
 
+  // Mounted only while there is a result, so the entry animation and the stat
+  // counters start from zero every run without any manual resetting.
   if (!result) return null;
+  return <RunOverPanel result={result} onRestart={onRestart} onExit={onExit} />;
+}
+
+function RunOverPanel({ result, onRestart, onExit }: GameOverProps & { result: RunSummary }) {
+  const backdrop = useSharedValue(0);
+  const titleScale = useSharedValue(0.6);
+  const statsReveal = useSharedValue(0);
+
+  const wave = useCountUp(result.waveReached);
+  const scrap = useCountUp(result.scrapEarned);
+  const gems = useCountUp(result.gemsCollected);
+
+  useEffect(() => {
+    backdrop.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) });
+    // The title lands hard, overshoots, and settles — the run just ended.
+    titleScale.value = withSequence(
+      withTiming(1.16, { duration: 220, easing: Easing.out(Easing.cubic) }),
+      withSpring(1, { damping: 9, stiffness: 190 }),
+    );
+    statsReveal.value = withDelay(200, withTiming(1, { duration: 320, easing: Easing.out(Easing.quad) }));
+  }, [backdrop, titleScale, statsReveal]);
+
+  // Declared below every write above: the React Compiler freezes a shared
+  // value the moment a hook captures it, so an animated style placed earlier
+  // would turn each `.value =` in the effect into an error.
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
+  const titleStyle = useAnimatedStyle(() => ({ transform: [{ scale: titleScale.value }] }));
+  const statsStyle = useAnimatedStyle(() => ({
+    opacity: statsReveal.value,
+    transform: [{ translateY: (1 - statsReveal.value) * 14 }],
+  }));
 
   return (
-    <View style={styles.backdrop}>
+    <Animated.View style={[styles.backdrop, backdropStyle]}>
       <View style={styles.content}>
-        <Image source={TITLE} style={styles.title} contentFit="contain" />
+        <Animated.View style={[styles.titleWrap, titleStyle]}>
+          <Image source={TITLE} style={styles.title} contentFit="contain" />
+        </Animated.View>
 
-        <View style={styles.stats}>
+        <Animated.View style={[styles.stats, statsStyle]}>
           <Text style={styles.stat} numberOfLines={1} adjustsFontSizeToFit>
-            Wave reached: <Text style={styles.statValue}>{formatInt(result.waveReached)}</Text>
+            Wave reached: <Text style={styles.statValue}>{formatInt(wave)}</Text>
           </Text>
           <Text style={styles.stat} numberOfLines={1} adjustsFontSizeToFit>
-            Scrap earned: <Text style={styles.statValue}>{formatNumber(result.scrapEarned)}</Text>
+            Scrap earned: <Text style={styles.statValue}>{formatNumber(scrap)}</Text>
           </Text>
           {result.gemsCollected > 0 && (
             <View style={styles.gemsRow}>
               <Text style={styles.stat}>Gems: </Text>
-              <Text style={styles.statValue}>{formatInt(result.gemsCollected)}</Text>
+              <Text style={styles.statValue}>{formatInt(gems)}</Text>
               <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
             </View>
           )}
-        </View>
+        </Animated.View>
 
         {/* TODO(ads): rewarded video, doubles scrapEarned + gemsCollected before banking. Inert until AdMob is wired up. */}
         {ADS_ENABLED && (
@@ -93,7 +171,7 @@ export function GameOver({ result, onRestart, onExit }: GameOverProps) {
           <Text style={styles.exitText}>To menu</Text>
         </Pressable>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -110,8 +188,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
+  titleWrap: { width: '92%' },
   title: {
-    width: '92%',
+    width: '100%',
     aspectRatio: 337.455 / 116,
   },
   stats: {

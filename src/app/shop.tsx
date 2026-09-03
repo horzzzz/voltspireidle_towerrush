@@ -1,15 +1,17 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { SCRAP_PACKS, SHOP_DAILY_GIFT_GEMS } from '@/game/data/shop';
+import { burstFrom } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
 
 const PANEL = require('@/assets/images/ui/panel-bar.png');
@@ -38,6 +40,45 @@ function Panel({ children }: { children: ReactNode }) {
       <Image source={PANEL} style={StyleSheet.absoluteFill} contentFit="fill" />
       <View style={styles.panelContent}>{children}</View>
     </View>
+  );
+}
+
+/**
+ * One catalog entry. Its own component purely so it can hold a ref: the
+ * bought Scrap has to fly out of the row that was tapped and into the top-bar
+ * counter, which needs that row's position on screen.
+ */
+function ScrapPack({
+  pack,
+  affordable,
+  onBuy,
+}: {
+  pack: (typeof SCRAP_PACKS)[number];
+  affordable: boolean;
+  onBuy: () => boolean;
+}) {
+  const rowRef = useRef<View>(null);
+  return (
+    <Pressable
+      ref={rowRef}
+      onPress={() => {
+        if (!onBuy()) return;
+        burstFrom(rowRef.current, 'scrap', 1.6);
+      }}
+      disabled={!affordable}
+      style={({ pressed }) => [pressed && affordable && styles.panelPressed, !affordable && styles.panelDisabled]}>
+      <Panel>
+        <View style={styles.row}>
+          <Text style={styles.panelTitle}>+{pack.scrap}</Text>
+          <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
+          <Text style={styles.panelTitle}>Scrap</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.amount}>{pack.gems}</Text>
+          <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
+        </View>
+      </Panel>
+    </Pressable>
   );
 }
 
@@ -92,31 +133,14 @@ export default function ShopScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {SCRAP_PACKS.map((pack) => {
-              const affordable = gems >= pack.gems;
-              return (
-                <Pressable
-                  key={pack.scrap}
-                  onPress={() => buyScrap(pack.gems, pack.scrap)}
-                  disabled={!affordable}
-                  style={({ pressed }) => [
-                    pressed && affordable && styles.panelPressed,
-                    !affordable && styles.panelDisabled,
-                  ]}>
-                  <Panel>
-                    <View style={styles.row}>
-                      <Text style={styles.panelTitle}>+{pack.scrap}</Text>
-                      <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
-                      <Text style={styles.panelTitle}>Scrap</Text>
-                    </View>
-                    <View style={styles.row}>
-                      <Text style={styles.amount}>{pack.gems}</Text>
-                      <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
-                    </View>
-                  </Panel>
-                </Pressable>
-              );
-            })}
+            {SCRAP_PACKS.map((pack) => (
+              <ScrapPack
+                key={pack.scrap}
+                pack={pack}
+                affordable={gems >= pack.gems}
+                onBuy={() => buyScrap(pack.gems, pack.scrap)}
+              />
+            ))}
           </View>
         )}
 
@@ -129,6 +153,8 @@ export default function ShopScreen() {
           </View>
         </Pressable>
       </ScrollView>
+
+      <RewardOverlay />
     </View>
   );
 }

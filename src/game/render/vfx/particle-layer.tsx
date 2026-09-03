@@ -1,0 +1,75 @@
+import { Atlas, useColorBuffer, useRSXformBuffer, useRectBuffer } from '@shopify/react-native-skia';
+import { memo } from 'react';
+import type { SharedValue } from 'react-native-reanimated';
+
+import { BRUSH_CELL, PR } from '@/game/vfx/layout';
+import { useBrushAtlas } from './brush-atlas';
+
+type Props = {
+  /** Packed [x, y, size, rot, r, g, b, a, brush] × capacity — see vfx/layout.ts. */
+  buffer: SharedValue<Float32Array>;
+  capacity: number;
+  /** 'plus' for glowing effects, 'srcOver' for solid debris. */
+  additive?: boolean;
+};
+
+/**
+ * One Skia `<Atlas>` draws an entire particle pool in a single GPU call, no
+ * matter how many particles are alive — the same trick `enemy-atlas.tsx` uses
+ * for the swarm, extended with the two per-instance buffers that pool needs:
+ * `sprites` (which procedural brush cell) and `colors` (tint *and* alpha, via
+ * `colorBlendMode="modulate"` against the all-white sheet).
+ *
+ * Three Reanimated mappers per layer, fixed. A dead slot writes size 0, which
+ * collapses its quad to nothing.
+ */
+/**
+ * Memoized for the same reason as `EnemyAtlas`: `buffer` is a stable
+ * SharedValue for the battle's lifetime, and this component registers THREE
+ * buffer-hook mappers (sprites/transforms/colors) — the most of any node in
+ * the scene — so an unmemoized re-render here is the single biggest source
+ * of avoidable Reanimated mapper churn (and strict-mode log spam) per frame.
+ */
+export const ParticleLayer = memo(function ParticleLayer({ buffer, capacity, additive }: Props) {
+  const image = useBrushAtlas();
+
+  const sprites = useRectBuffer(capacity, (val, i) => {
+    'worklet';
+    const brush = buffer.value[i * PR.STRIDE + PR.brush];
+    val.setXYWH(brush * BRUSH_CELL, 0, BRUSH_CELL, BRUSH_CELL);
+  });
+
+  const transforms = useRSXformBuffer(capacity, (val, i) => {
+    'worklet';
+    const data = buffer.value;
+    const base = i * PR.STRIDE;
+    const scale = data[base + PR.size] / BRUSH_CELL;
+    const rot = data[base + PR.rot];
+    const scos = Math.cos(rot) * scale;
+    const ssin = Math.sin(rot) * scale;
+    // Centering translation for a rotated cell: its middle must land on (x, y).
+    const c = BRUSH_CELL / 2;
+    val.set(scos, ssin, data[base + PR.x] - (scos * c - ssin * c), data[base + PR.y] - (ssin * c + scos * c));
+  });
+
+  const colors = useColorBuffer(capacity, (val, i) => {
+    'worklet';
+    const data = buffer.value;
+    const base = i * PR.STRIDE;
+    val[0] = data[base + PR.r];
+    val[1] = data[base + PR.g];
+    val[2] = data[base + PR.b];
+    val[3] = data[base + PR.a];
+  });
+
+  return (
+    <Atlas
+      image={image}
+      sprites={sprites}
+      transforms={transforms}
+      colors={colors}
+      colorBlendMode="modulate"
+      blendMode={additive ? 'plus' : 'srcOver'}
+    />
+  );
+});

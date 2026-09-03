@@ -26,7 +26,7 @@ export default function BattleScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- loadout is intentionally frozen for the run's lifetime
   const loadout = useMemo(() => buildRunLoadout(coilworks, voltage, coilworksUnlocked), []);
 
-  const { buffers, actions } = useBattleEngine(loadout);
+  const { buffers, vfx, actions } = useBattleEngine(loadout);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const result = useBattleStore((s) => s.result);
   const bankRun = useMetaStore((s) => s.bankRun);
@@ -65,7 +65,7 @@ export default function BattleScreen() {
 
   return (
     <View style={styles.container}>
-      <BattleCanvas buffers={buffers} />
+      <BattleCanvas buffers={buffers} vfx={vfx} />
 
       <View style={styles.overlay} pointerEvents="box-none">
         <HudTop onSettingsPress={() => setSettingsVisible(true)} onSetSpeed={actions.setSpeed} />

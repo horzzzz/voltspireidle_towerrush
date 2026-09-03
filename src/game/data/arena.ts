@@ -40,3 +40,17 @@ export function raySpawnPoint(angle: number): { x: number; y: number } {
   const t = Math.min(tToVerticalEdge, tToHorizontalEdge) + SPAWN_MARGIN;
   return { x: TOWER_X + dx * t, y: TOWER_Y + dy * t };
 }
+
+/**
+ * Where the battle HUD's Charge and Scrap readouts sit, expressed in this
+ * same design space, so canvas effects can fly a reward mote to the counter
+ * it is paying into (see vfx/system.ts `onKill`).
+ *
+ * Approximate on purpose: the HUD is React Native laid over the canvas, with
+ * its own safe-area inset, so there is no exact mapping. These are the values
+ * for a typical portrait phone (`HudTop`'s left column, ~x12 + a 20px icon,
+ * under a ~48pt status-bar inset) and only ever need to be close enough that a
+ * mote reads as flying "up into the counter".
+ */
+export const CHARGE_HUD_ANCHOR = { x: 38, y: 74 } as const;
+export const SCRAP_HUD_ANCHOR = { x: 38, y: 104 } as const;
