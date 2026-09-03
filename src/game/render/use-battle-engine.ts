@@ -5,7 +5,7 @@ import { buyUpgrade as buyUpgradeAction } from '../core/upgrades';
 import { advanceSimulation, createWorld, retireRun, setSpeedMultiplier } from '../core/world';
 import type { RunLoadout, UpgradeId } from '../core/types';
 import { useBattleStore } from '../state/battle-store';
-import { ENEMY_RENDER_SCALE } from './enemy-atlas';
+import { BOSS_RENDER_SCALE, ENEMY_RENDER_SCALE } from './enemy-atlas';
 import { createEmptyEnemyBuffers, packEnemyBuffers } from './enemy-buffers';
 
 export type SpeedMultiplier = 1 | 2 | 3;
@@ -31,6 +31,9 @@ export function useBattleEngine(loadout: RunLoadout) {
   const scavengerBuffer = useSharedValue(createEmptyEnemyBuffers().scavenger);
   const hulkBuffer = useSharedValue(createEmptyEnemyBuffers().hulk);
   const runnerBuffer = useSharedValue(createEmptyEnemyBuffers().runner);
+  const boss0Buffer = useSharedValue(createEmptyEnemyBuffers().boss0);
+  const boss1Buffer = useSharedValue(createEmptyEnemyBuffers().boss1);
+  const boss2Buffer = useSharedValue(createEmptyEnemyBuffers().boss2);
 
   const lastFrameRef = useRef<number | null>(null);
   const lastPublishRef = useRef(0);
@@ -50,10 +53,13 @@ export function useBattleEngine(loadout: RunLoadout) {
       // Fresh arrays every frame — see enemy-buffers.ts on why a new
       // reference (not an in-place mutation) is what makes the Atlas
       // buffers' Reanimated mapper actually re-run.
-      const packed = packEnemyBuffers(world, ENEMY_RENDER_SCALE);
+      const packed = packEnemyBuffers(world, ENEMY_RENDER_SCALE, BOSS_RENDER_SCALE);
       scavengerBuffer.value = packed.scavenger;
       hulkBuffer.value = packed.hulk;
       runnerBuffer.value = packed.runner;
+      boss0Buffer.value = packed.boss0;
+      boss1Buffer.value = packed.boss1;
+      boss2Buffer.value = packed.boss2;
 
       if (now - lastPublishRef.current >= PUBLISH_INTERVAL_MS) {
         lastPublishRef.current = now;
@@ -102,7 +108,14 @@ export function useBattleEngine(loadout: RunLoadout) {
   );
 
   return {
-    buffers: { scavenger: scavengerBuffer, hulk: hulkBuffer, runner: runnerBuffer },
+    buffers: {
+      scavenger: scavengerBuffer,
+      hulk: hulkBuffer,
+      runner: runnerBuffer,
+      boss0: boss0Buffer,
+      boss1: boss1Buffer,
+      boss2: boss2Buffer,
+    },
     actions,
   };
 }

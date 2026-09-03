@@ -44,6 +44,11 @@ export interface Enemy {
   /** Countdown to the next contact hit, once `inContact` is true. */
   attackCooldown: number;
   inContact: boolean;
+  /**
+   * Which boss sprite this enemy wears, 0-based, cycled by wave (see
+   * `pickBossVariant`). Render-only; always 0 for non-bosses.
+   */
+  bossVariant: number;
   /** True for exactly one enemy every GEM_WAVE_INTERVAL waves — see spawn.ts. */
   dropsGem: boolean;
 }

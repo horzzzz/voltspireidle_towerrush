@@ -23,7 +23,16 @@ export function updateMovement(world: WorldState, dt: number): void {
       enemy.dirY = dy / dist;
     }
 
-    if (dist > stopDist) {
+    // Tolerance so an enemy that has walked right up to its stop distance
+    // counts as "in contact". Movement below clamps the final step to exactly
+    // `dist - stopDist`, so without this slack `dist` settles a hair above
+    // `stopDist` (float rounding) and never satisfies a strict `dist <= stopDist`
+    // — the enemy freezes at the tower forever without ever dealing a hit.
+    // A big body (a boss, whose sub-pixel steps never close the last gap) hit
+    // this every time.
+    const CONTACT_SLACK = 0.5;
+
+    if (dist > stopDist + CONTACT_SLACK) {
       const step = Math.min(enemy.speed * dt, dist - stopDist);
       enemy.x += (dx / dist) * step;
       enemy.y += (dy / dist) * step;

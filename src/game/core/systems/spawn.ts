@@ -1,6 +1,12 @@
 import { ENEMY_BASE_RADIUS, raySpawnPoint } from '../../data/arena';
 import { NORMAL_MAX_ON_SCREEN, WAVE_COOLDOWN_DURATION, WAVE_SPAWN_PHASE_DURATION } from '../../data/balance';
-import { BOSS_PROFILE, buildWaveComposition, ENEMY_PROFILES, pickBossKind } from '../../data/enemies';
+import {
+  BOSS_PROFILE,
+  buildWaveComposition,
+  ENEMY_PROFILES,
+  pickBossKind,
+  pickBossVariant,
+} from '../../data/enemies';
 import { getWaveConfig, type WaveConfig } from '../../data/waves';
 import { scrapRewardForKill } from '../formulas';
 import type { Enemy, SpawnEntry, WorldState } from '../types';
@@ -135,6 +141,7 @@ function spawnEnemy(world: WorldState, entry: SpawnEntry, config: WaveConfig): v
     scrapReward: scrapRewardForKill(profile.scrap, entry.isBoss, config.wave),
     attackCooldown: 0,
     inContact: false,
+    bossVariant: entry.isBoss ? pickBossVariant(config.wave) : 0,
     dropsGem: entry.dropsGem ?? false,
   };
   world.enemies.push(enemy);

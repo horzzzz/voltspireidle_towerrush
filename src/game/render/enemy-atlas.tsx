@@ -4,7 +4,7 @@ import type { SharedValue } from 'react-native-reanimated';
 
 import { ENEMY_BASE_RADIUS } from '@/game/data/arena';
 import type { EnemyKind } from '@/game/core/types';
-import { FIELDS_PER_SLOT, MAX_PER_KIND } from './enemy-buffers';
+import { FIELDS_PER_SLOT, MAX_BOSS, MAX_PER_KIND } from './enemy-buffers';
 
 /** On-screen diameter, in design px, for a kind-1.0-scale enemy. */
 const BASE_DIAMETER = ENEMY_BASE_RADIUS * 2;
@@ -16,34 +16,66 @@ const SOURCES: Record<EnemyKind, { module: number; width: number; height: number
   runner: { module: require('@/assets/images/battle/enemy-03.png'), width: 277, height: 506 },
 };
 
-/** "Design px per source px" at profile scale 1 — see enemy-buffers.ts. */
+/**
+ * Dedicated boss sprites (top-down), indexed by `enemy.bossVariant` — a wave
+ * cycle, see `pickBossVariant`. `front` is the unit vector the artwork's
+ * "nose" points along in its own source pixels; the transform rotates that
+ * onto the walk direction so the boss faces the tower.
+ */
+const BOSS_SOURCES: { module: number; width: number; height: number; front: [number, number] }[] = [
+  // boss-1: blue spider — radial body, glowing head toward the bottom.
+  { module: require('@/assets/images/battle/boss-1.png'), width: 190, height: 139, front: [0, 1] },
+  // boss-2: green worm — head/mandibles on the left.
+  { module: require('@/assets/images/battle/boss-2.png'), width: 185, height: 59, front: [-1, 0] },
+  // boss-3: orange beetle — mandibles pointing up.
+  { module: require('@/assets/images/battle/boss-3.png'), width: 119, height: 117, front: [0, -1] },
+];
+
+/** "Design px per source px" at scale 1 — see enemy-buffers.ts. */
 export const ENEMY_RENDER_SCALE: Record<EnemyKind, number> = {
   scavenger: BASE_DIAMETER / SOURCES.scavenger.width,
   hulk: BASE_DIAMETER / SOURCES.hulk.width,
   runner: BASE_DIAMETER / SOURCES.runner.width,
 };
 
+/**
+ * Boss sprites vary wildly in aspect (the worm is wide and short), so scale
+ * by the larger dimension to keep a consistent on-screen footprint. Tunable —
+ * verify on web/emulator.
+ */
+export const BOSS_RENDER_SCALE: number[] = BOSS_SOURCES.map(
+  (s) => BASE_DIAMETER / Math.max(s.width, s.height),
+);
+
 type Props = {
-  kind: EnemyKind;
-  /** Packed [x, y, finalScale] × MAX_PER_KIND, refreshed every sim tick. */
+  /** Regular enemy kind — its source sprite. Ignored when `bossVariant` is set. */
+  kind?: EnemyKind;
+  /** When set, draw the dedicated boss sprite for this variant instead. */
+  bossVariant?: number;
+  /** Packed [x, y, finalScale, dirX, dirY] × capacity, refreshed every sim tick. */
   buffer: SharedValue<Float32Array>;
 };
 
 /**
- * One Skia `<Atlas>` per enemy kind — every instance of that kind, in one
- * GPU draw call, regardless of how many are alive. A boss is just a larger
- * `finalScale` value in the same buffer, not a separate draw path.
+ * One Skia `<Atlas>` per enemy kind (and per boss sprite variant) — every
+ * instance in one GPU draw call, regardless of how many are alive. A boss is
+ * just a different source + a larger `finalScale`, not a separate draw path.
  */
-export function EnemyAtlas({ kind, buffer }: Props) {
-  const { module: source, width, height } = SOURCES[kind];
+export function EnemyAtlas({ kind, bossVariant, buffer }: Props) {
+  const isBoss = bossVariant != null;
+  const bossSrc = isBoss ? BOSS_SOURCES[bossVariant] : null;
+  const src = bossSrc ?? SOURCES[kind ?? 'scavenger'];
+  const { module: source, width, height } = src;
+  const [frontX, frontY] = bossSrc ? bossSrc.front : [0, 1];
+  const capacity = isBoss ? MAX_BOSS : MAX_PER_KIND;
   const image = useImage(source);
 
   const sprites = useMemo(
-    () => Array.from({ length: MAX_PER_KIND }, () => Skia.XYWHRect(0, 0, width, height)),
-    [width, height],
+    () => Array.from({ length: capacity }, () => Skia.XYWHRect(0, 0, width, height)),
+    [capacity, width, height],
   );
 
-  const transforms = useRSXformBuffer(MAX_PER_KIND, (val, i) => {
+  const transforms = useRSXformBuffer(capacity, (val, i) => {
     'worklet';
     const data = buffer.value;
     const base = i * FIELDS_PER_SLOT;
@@ -52,14 +84,13 @@ export function EnemyAtlas({ kind, buffer }: Props) {
     const y = data[base + 1];
     const dirX = data[base + 3];
     const dirY = data[base + 4];
-    // Every sprite's front (mandibles/head) faces down (+Y) in its source
-    // art. Rotate so that front points along (dirX, dirY) — the walk
-    // direction toward the tower — instead of always drawing it upright.
-    // For a rotation-scale matrix [[scos,-ssin],[ssin,scos]], mapping the
-    // local front vector (0,1) onto (dirX,dirY) gives scos=scale*dirY,
-    // ssin=-scale*dirX (dirY=1,dirX=0 recovers the old no-rotation case).
-    const scos = scale * dirY;
-    const ssin = -scale * dirX;
+    // Rotate the sprite so its art-space front vector (frontX, frontY) points
+    // along (dirX, dirY) — the walk direction toward the tower. For a
+    // rotation-scale matrix [[scos,-ssin],[ssin,scos]], the rotation taking
+    // (frontX,frontY) to (dirX,dirY) is scos = f·d, ssin = f×d.
+    // (frontX,frontY)=(0,1) recovers the old scos=scale*dirY, ssin=-scale*dirX.
+    const scos = scale * (frontX * dirX + frontY * dirY);
+    const ssin = scale * (frontX * dirY - frontY * dirX);
     const cx = width / 2;
     const cy = height / 2;
     // Centering translation for a rotated rect: source center (cx, cy) must

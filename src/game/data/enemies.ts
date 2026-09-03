@@ -81,6 +81,19 @@ export function pickBossKind(wave: number): EnemyKind {
   return BOSS_SPRITE_CYCLE[cycled];
 }
 
+/** Number of distinct boss sprites (assets/images/battle/boss-{1,2,3}.png). */
+export const BOSS_VARIANT_COUNT = 3;
+
+/**
+ * Which dedicated boss sprite a wave's boss wears — a plain wave cycle,
+ * independent of the boss's enemy `kind`: wave 10 -> boss-1, 20 -> boss-2,
+ * 30 -> boss-3, 40 -> boss-1, ...
+ */
+export function pickBossVariant(wave: number): number {
+  const index = Math.floor(wave / 10) - 1;
+  return ((index % BOSS_VARIANT_COUNT) + BOSS_VARIANT_COUNT) % BOSS_VARIANT_COUNT;
+}
+
 /**
  * Shares follow the original's `enemy_type_share`: each special type ramps
  * from 0 to 30% of the wave over 20 waves once its own minimum wave is

@@ -16,6 +16,9 @@ type Props = {
     scavenger: SharedValue<Float32Array>;
     hulk: SharedValue<Float32Array>;
     runner: SharedValue<Float32Array>;
+    boss0: SharedValue<Float32Array>;
+    boss1: SharedValue<Float32Array>;
+    boss2: SharedValue<Float32Array>;
   };
 };
 
@@ -57,6 +60,11 @@ export function BattleCanvas({ buffers }: Props) {
           <EnemyAtlas kind="scavenger" buffer={buffers.scavenger} />
           <EnemyAtlas kind="hulk" buffer={buffers.hulk} />
           <EnemyAtlas kind="runner" buffer={buffers.runner} />
+
+          {/* Bosses draw on top of the regular swarm. */}
+          <EnemyAtlas bossVariant={0} buffer={buffers.boss0} />
+          <EnemyAtlas bossVariant={1} buffer={buffers.boss1} />
+          <EnemyAtlas bossVariant={2} buffer={buffers.boss2} />
 
           <EffectsLayer />
         </Group>
