@@ -9,6 +9,14 @@
  * pool that grew with the action would thrash on every burst. Overflow is
  * handled by round-robin reuse — a new particle displaces the oldest one —
  * which degrades smoothly instead of stalling.
+ *
+ * Everything except the two particle pools shares ONE array (see `VFX` at the
+ * bottom). Handing a shared value a `Float32Array` is not free: worklets
+ * copies the bytes into a C++ vector on the JS thread and rebuilds an
+ * `ArrayBuffer` + typed-array wrapper on the UI thread, per assignment. Four
+ * small buffers meant paying that per-call overhead four times a frame for
+ * ~2KB of data, so globals, numbers, beams and rings are packed end to end
+ * and published as one.
  */
 
 /** Which procedurally-drawn brush cell in the atlas a particle uses. */
@@ -70,7 +78,20 @@ export const N = {
   kind: 7,
   STRIDE: 8,
 } as const;
-export const NR = { x: 0, y: 1, scale: 2, a: 3, r: 4, g: 5, b: 6, STRIDE: 7 } as const;
+/**
+ * The render side gets the raw `amount` and `kind` rather than a formatted
+ * string: the label text is built (and cached) on the UI thread instead, so a
+ * 28-entry string array no longer has to be rebuilt and serialised every
+ * frame a single damage number changes. `kind` also picks the colour, so
+ * there is no need to ship r/g/b per number either.
+ */
+export const NR = { x: 0, y: 1, scale: 2, a: 3, amount: 4, kind: 5, STRIDE: 6 } as const;
+
+/** Number kinds — shared by the sim (which classifies) and the renderer (which colours). */
+export const KIND_NORMAL = 0;
+export const KIND_CRIT = 1;
+export const KIND_BOSS = 2;
+export const KIND_TOWER = 3;
 
 /** Lightning bolts. */
 export const BEAM_CAP = 24;
@@ -96,27 +117,40 @@ export const R = {
 } as const;
 export const RR = { x: 0, y: 1, radius: 2, width: 3, r: 4, g: 5, b: 6, a: 7, STRIDE: 8 } as const;
 
-/** Screen-wide state: camera shake, vignette, flash, tower recoil, wave banner. */
+/**
+ * Screen-wide state: camera shake, vignette, flash, tower recoil, wave banner,
+ * tower HP. Colours are gone from here on purpose — the vignette is always
+ * `VfxColors.hurt` (baked into its texture, see render/vfx/overlay-texture.ts)
+ * and the banner's colour is baked into the banner texture.
+ */
 export const G = {
   shakeX: 0,
   shakeY: 1,
   vignette: 2,
-  vignetteR: 3,
-  vignetteG: 4,
-  vignetteB: 5,
-  flash: 6,
+  flash: 3,
   /** Just-took-damage level, without the low-HP pulse the vignette folds in. */
-  hurt: 7,
+  hurt: 4,
   /** Tower kickback, design px — applied to the tower sprite only. */
-  recoilX: 8,
-  recoilY: 9,
+  recoilX: 5,
+  recoilY: 6,
   /** Wave/boss banner: 0 hides it entirely. */
-  bannerAlpha: 10,
-  bannerScale: 11,
-  bannerR: 12,
-  bannerG: 13,
-  bannerB: 14,
-  STRIDE: 15,
+  bannerAlpha: 7,
+  bannerScale: 8,
+  /** Tower HP 0..1 — drives the HP ring, drawn straight from this buffer. */
+  hp: 9,
+  STRIDE: 10,
+} as const;
+
+/**
+ * Offsets, in floats, of each section inside the one combined battle VFX
+ * buffer. `VFX.SIZE` is its total length.
+ */
+export const VFX = {
+  globals: 0,
+  numbers: G.STRIDE,
+  beams: G.STRIDE + NUMBER_CAP * NR.STRIDE,
+  rings: G.STRIDE + NUMBER_CAP * NR.STRIDE + BEAM_CAP * BR.STRIDE,
+  SIZE: G.STRIDE + NUMBER_CAP * NR.STRIDE + BEAM_CAP * BR.STRIDE + RING_CAP * RR.STRIDE,
 } as const;
 
 /**

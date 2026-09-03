@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
 import { formatNumber, formatStatValue } from '@/game/core/numbers';
-import { isUpgradeMaxed, loadoutBaseFor, upgradeCost, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
-import type { RunLoadout } from '@/game/core/types';
+import { loadoutBaseFor, upgradeValue, type UpgradeDef } from '@/game/data/tower-stats';
+import type { RunLoadout, UpgradeId } from '@/game/core/types';
 
 const ICONS: Record<UpgradeDef['icon'], number> = {
   damage: require('@/assets/images/battle/up-damage.png'),
@@ -26,23 +27,36 @@ function formatStat(def: UpgradeDef, level: number, base: number | undefined): s
 }
 
 type UpgradeRowProps = {
+  id: UpgradeId;
   def: UpgradeDef;
   level: number;
-  charge: number;
+  /** Pre-computed by the bar, not the row: see the memoization note below. */
+  cost: number | null;
+  affordable: boolean;
   loadout: RunLoadout;
-  onBuy: () => void;
+  onBuy: (id: UpgradeId) => void;
 };
 
-/** One buyable in-run upgrade (Figma node 1:1549) — icon, current → next stat, Charge cost. */
-export function UpgradeRow({ def, level, charge, loadout, onBuy }: UpgradeRowProps) {
-  const maxed = isUpgradeMaxed(def, level);
-  const cost = maxed ? null : upgradeCost(def, level);
-  const affordable = cost != null && charge >= cost;
+/**
+ * One buyable in-run upgrade (Figma node 1:1549) — icon, current → next stat,
+ * Charge cost.
+ *
+ * Memoized, and deliberately taking `cost`/`affordable` rather than the raw
+ * `charge` total: `battle-store` publishes at ~10Hz while Charge is
+ * continuously ticking up, so a prop of the raw number would change (and
+ * re-render every row) on nearly every publish. `affordable` only flips when
+ * this particular row's own threshold is actually crossed, and `onBuy` is
+ * the engine's own stable callback (see use-battle-engine's `actions`) taking
+ * `id` rather than a fresh per-row closure — so an unrelated row buying
+ * something no longer re-renders this one at all.
+ */
+export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, affordable, loadout, onBuy }: UpgradeRowProps) {
+  const maxed = cost == null;
   const base = loadoutBaseFor(def.id, loadout);
 
   return (
     <Pressable
-      onPress={onBuy}
+      onPress={() => onBuy(id)}
       disabled={maxed || !affordable}
       style={({ pressed }) => [styles.row, maxed && styles.rowMaxed, pressed && affordable && styles.pressed]}>
       <Image source={ICONS[def.icon]} style={styles.icon} contentFit="contain" />
@@ -61,7 +75,7 @@ export function UpgradeRow({ def, level, charge, loadout, onBuy }: UpgradeRowPro
       )}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   row: {

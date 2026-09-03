@@ -1,8 +1,24 @@
-import { formatInt, formatNumber } from '../core/numbers';
 import { Rng } from '../core/rng';
 import type { VfxEvent } from '../core/types';
 import { CHARGE_HUD_ANCHOR, SCRAP_HUD_ANCHOR, TOWER_X, TOWER_Y } from '../data/arena';
-import { ADDITIVE_CAP, B, BEAM_CAP, BR, Brush, G, N, NORMAL_CAP, NR, NUMBER_CAP, RING_CAP } from './layout';
+import {
+  ADDITIVE_CAP,
+  B,
+  BEAM_CAP,
+  BR,
+  Brush,
+  G,
+  KIND_BOSS,
+  KIND_CRIT,
+  KIND_NORMAL,
+  KIND_TOWER,
+  N,
+  NORMAL_CAP,
+  NR,
+  NUMBER_CAP,
+  RING_CAP,
+  VFX,
+} from './layout';
 import { ParticlePool, RingPool } from './pools';
 import { BOSS_ACCENT, ENEMY_ACCENT, VfxColors, type Rgb } from './palette';
 
@@ -10,8 +26,13 @@ import { BOSS_ACCENT, ENEMY_ACCENT, VfxColors, type Rgb } from './palette';
  * Hard ceiling on particles spawned in a single frame. A wave wiping out
  * thirty enemies at once must never be able to turn into a frame spike — it
  * just looks slightly less lavish than the same thirty kills spread out.
+ * Halved (see `update`) whenever the frame itself is already running slow, so
+ * a lagging device doesn't dig its own hole deeper: fewer particles is what
+ * lets it recover instead of feeding back into worse lag.
  */
 const MAX_SPAWNS_PER_FRAME = 120;
+/** `dt` above which a frame counts as "already struggling" — 45fps. */
+const SLOW_FRAME_DT = 1 / 45;
 
 /** Peak camera-shake offset in design px, at full trauma. */
 const MAX_SHAKE = 7;
@@ -25,14 +46,6 @@ type Ctx = {
   /** Tower HP 0..1, drives the low-health vignette. */
   hpFraction: number;
 };
-
-/** Number kinds, matching the `N.kind` slot. */
-const KIND_NORMAL = 0;
-const KIND_CRIT = 1;
-const KIND_BOSS = 2;
-const KIND_TOWER = 3;
-
-const NUMBER_COLORS: Rgb[] = [[1, 1, 1], VfxColors.crit, VfxColors.boss, VfxColors.hurt];
 
 /** Hits read best as a hot white core cooling to the tower's own blue. */
 function sparkColor(rng: Rng, isCrit: boolean): Rgb {
@@ -50,10 +63,13 @@ function sparkColor(rng: Rng, isCrit: boolean): Rgb {
  * loop; `use-battle-engine`'s existing rAF drives it, right next to the enemy
  * position packing.
  *
- * Every output buffer is double-buffered (see ParticlePool): packing
- * alternates between two pre-allocated arrays and hands out whichever was just
- * written. That gives the render layer the fresh *reference* its Reanimated
- * mappers need to re-run without allocating tens of kilobytes a frame.
+ * Globals, numbers, beams and rings are packed into ONE `Float32Array` (see
+ * `VFX` in layout.ts) rather than four — publishing a shared value has a real
+ * per-call cost (see pools.ts's note on why the buffer must be a fresh
+ * reference each frame), so four small arrays paid that cost four times for
+ * a couple KB of data combined. The two particle pools stay separate: they
+ * are the two buffers actually large enough (tens of KB) for the
+ * fresh-allocation cost itself to matter more than the per-call overhead.
  */
 export class VfxSystem {
   private readonly rng: Rng;
@@ -64,22 +80,13 @@ export class VfxSystem {
 
   private readonly numbers = new Float32Array(NUMBER_CAP * N.STRIDE);
   private readonly beams = new Float32Array(BEAM_CAP * B.STRIDE);
-  private numberCursor = 0;
-  private beamCursor = 0;
 
   /**
    * Fresh every `update()` — see `ParticlePool`'s note in vfx/pools.ts on why
    * reusing a fixed pair and mutating in place silently breaks Reanimated's
    * cross-thread propagation here.
    */
-  private numbersOut = new Float32Array(NUMBER_CAP * NR.STRIDE);
-  private beamsOut = new Float32Array(BEAM_CAP * BR.STRIDE);
-  private globalsOut = new Float32Array(G.STRIDE);
-
-  /** One label per number slot. A fresh array is published only when a label actually changes. */
-  private readonly labels: string[] = new Array(NUMBER_CAP).fill('');
-  private labelsOut: string[] = new Array(NUMBER_CAP).fill('');
-  private labelsDirty = false;
+  private out = new Float32Array(VFX.SIZE);
 
   private time = 0;
   private trauma = 0;
@@ -91,8 +98,6 @@ export class VfxSystem {
   private recoilY = 0;
   private bannerLife = 0;
   private bannerMaxLife = 1;
-  private bannerText = '';
-  private bannerColor: Rgb = VfxColors.waveScan;
 
   /** 1 = full detail, falls toward 0.3 as the field (or a pool) fills up. */
   private detail = 1;
@@ -111,7 +116,11 @@ export class VfxSystem {
    */
   update(dt: number, events: VfxEvent[], ctx: Ctx): void {
     this.time += dt;
-    this.budget = MAX_SPAWNS_PER_FRAME;
+    // A frame that is already slow gets half the spawn budget — otherwise a
+    // device struggling to keep up spawns just as much as one running at 60,
+    // which only digs the hole deeper (bigger dt next frame → more sim steps
+    // → more events → more particles → slower still).
+    this.budget = dt > SLOW_FRAME_DT ? MAX_SPAWNS_PER_FRAME >> 1 : MAX_SPAWNS_PER_FRAME;
 
     // Automatic level of detail. Whichever is under more pressure — the field
     // or the pools themselves — decides how lavish a burst is allowed to be.
@@ -130,14 +139,13 @@ export class VfxSystem {
     this.ringPool.update(dt);
     this.integrateNumbers(dt);
     this.integrateBeams(dt);
-    this.integrateGlobals(dt, ctx);
 
-    this.packNumbers();
-    this.packBeams();
-    if (this.labelsDirty) {
-      this.labelsOut = this.labels.slice();
-      this.labelsDirty = false;
-    }
+    const out = new Float32Array(VFX.SIZE);
+    this.packGlobals(dt, ctx, out);
+    this.packNumbers(out);
+    this.packBeams(out);
+    this.packRings(out);
+    this.out = out;
   }
 
   /** Fully resets every pool — used when a run restarts in place. */
@@ -147,15 +155,12 @@ export class VfxSystem {
     this.ringPool.reset();
     this.numbers.fill(0);
     this.beams.fill(0);
-    this.labels.fill('');
-    this.labelsDirty = true;
     this.trauma = 0;
     this.hurt = 0;
     this.flash = 0;
     this.recoilX = 0;
     this.recoilY = 0;
     this.bannerLife = 0;
-    this.bannerText = '';
   }
 
   get additiveBuffer(): Float32Array {
@@ -164,26 +169,10 @@ export class VfxSystem {
   get normalBuffer(): Float32Array {
     return this.normal.buffer;
   }
-  get ringsBuffer(): Float32Array {
-    return this.ringPool.buffer;
+  /** Globals + numbers + beams + rings, packed at the offsets in `VFX` (layout.ts). */
+  get buffer(): Float32Array {
+    return this.out;
   }
-  get numbersBuffer(): Float32Array {
-    return this.numbersOut;
-  }
-  get beamsBuffer(): Float32Array {
-    return this.beamsOut;
-  }
-  get globalsBuffer(): Float32Array {
-    return this.globalsOut;
-  }
-  get numberLabels(): string[] {
-    return this.labelsOut;
-  }
-  /** Current wave/boss banner caption; empty while nothing is showing. */
-  get banner(): string {
-    return this.bannerText;
-  }
-
   // ---------------------------------------------------------------- events
 
   private ingest(event: VfxEvent): void {
@@ -215,7 +204,7 @@ export class VfxSystem {
         this.onTowerHit(event.x, event.y, event.dirX, event.dirY, event.amount);
         break;
       case 'waveStart':
-        this.onWaveStart(event.isBoss, event.wave);
+        this.onWaveStart(event.isBoss);
         break;
       case 'upgrade':
         this.onUpgrade();
@@ -427,24 +416,23 @@ export class VfxSystem {
     this.trauma = Math.min(1, this.trauma + 0.22);
   }
 
-  private onWaveStart(isBoss: boolean, wave: number): void {
+  private onWaveStart(isBoss: boolean): void {
     this.ringPool.spawn(
       TOWER_X,
       TOWER_Y,
       20,
-      560,
+      // Trimmed from 560 — a ring that far off-arena was never visible anyway.
+      480,
       isBoss ? 1 : 0.85,
       isBoss ? VfxColors.boss : VfxColors.waveScan,
       5,
       1,
       0.5,
     );
-    this.bannerText = isBoss ? `BOSS · WAVE ${wave}` : `WAVE ${wave}`;
-    this.bannerColor = isBoss ? VfxColors.boss : VfxColors.waveScan;
     this.bannerLife = isBoss ? 2.2 : 1.5;
     this.bannerMaxLife = this.bannerLife;
     if (isBoss) {
-      this.ringPool.spawn(TOWER_X, TOWER_Y, 20, 380, 0.7, VfxColors.boss, 3, 0.8, 0.45);
+      // A single ring reads just as well as two here, at half the stroke cost.
       this.hurt = Math.min(1, this.hurt + 0.65);
       this.trauma = Math.min(1, this.trauma + 0.3);
     }
@@ -492,7 +480,6 @@ export class VfxSystem {
       // Refresh the tail of its life so a merged number never blinks out
       // mid-combo, but don't restart the rise — it would visibly jerk.
       this.numbers[base + N.life] = Math.max(this.numbers[base + N.life], 0.55);
-      this.setLabel(i, this.numbers[base + N.amount], kind);
       return;
     }
 
@@ -508,8 +495,10 @@ export class VfxSystem {
     this.numbers[base + N.invMaxLife] = 1 / life;
     this.numbers[base + N.amount] = amount;
     this.numbers[base + N.kind] = kind;
-    this.setLabel(slot, amount, kind);
   }
+
+  private beamCursor = 0;
+  private numberCursor = 0;
 
   // ------------------------------------------------------------ integration
 
@@ -521,7 +510,6 @@ export class VfxSystem {
       const left = life - dt;
       if (left <= 0) {
         this.numbers[base + N.life] = 0;
-        this.setLabelText(i, '');
         continue;
       }
       this.numbers[base + N.life] = left;
@@ -541,16 +529,15 @@ export class VfxSystem {
     }
   }
 
-  private integrateGlobals(dt: number, ctx: Ctx): void {
+  private packGlobals(dt: number, ctx: Ctx, out: Float32Array): void {
     this.trauma = Math.max(0, this.trauma - dt * 1.9);
     this.hurt = Math.max(0, this.hurt - dt * 2.1);
     this.flash = Math.max(0, this.flash - dt * 5.5);
 
+    const base = VFX.globals;
     const shake = this.trauma * this.trauma * MAX_SHAKE;
-    this.globalsOut = new Float32Array(G.STRIDE);
-    const out = this.globalsOut;
-    out[G.shakeX] = shake * Math.sin(this.time * 43 + this.shakeSeed);
-    out[G.shakeY] = shake * Math.sin(this.time * 37.3 + this.shakeSeed * 1.7);
+    out[base + G.shakeX] = shake * Math.sin(this.time * 43 + this.shakeSeed);
+    out[base + G.shakeY] = shake * Math.sin(this.time * 37.3 + this.shakeSeed * 1.7);
 
     // Below a quarter HP the frame breathes red on its own, so the player
     // feels the run slipping without having to read the ring.
@@ -558,35 +545,29 @@ export class VfxSystem {
       ctx.hpFraction < 0.25 && ctx.hpFraction > 0
         ? (1 - ctx.hpFraction / 0.25) * (0.3 + 0.12 * Math.sin(this.time * 4.5))
         : 0;
-    out[G.vignette] = Math.min(1, this.hurt + lowHp);
-    out[G.vignetteR] = VfxColors.hurt[0];
-    out[G.vignetteG] = VfxColors.hurt[1];
-    out[G.vignetteB] = VfxColors.hurt[2];
-    out[G.flash] = this.flash;
-    out[G.hurt] = this.hurt;
+    out[base + G.vignette] = Math.min(1, this.hurt + lowHp);
+    out[base + G.flash] = this.flash;
+    out[base + G.hurt] = this.hurt;
+    out[base + G.hp] = ctx.hpFraction;
 
     // Recoil springs back rather than decaying, so rapid fire reads as a
     // rhythm instead of the tower drifting off its footing.
     this.recoilX -= this.recoilX * Math.min(1, 16 * dt);
     this.recoilY -= this.recoilY * Math.min(1, 16 * dt);
-    out[G.recoilX] = this.recoilX;
-    out[G.recoilY] = this.recoilY;
+    out[base + G.recoilX] = this.recoilX;
+    out[base + G.recoilY] = this.recoilY;
 
     this.bannerLife = Math.max(0, this.bannerLife - dt);
     if (this.bannerLife <= 0) {
-      out[G.bannerAlpha] = 0;
-      out[G.bannerScale] = 0;
-      this.bannerText = '';
+      out[base + G.bannerAlpha] = 0;
+      out[base + G.bannerScale] = 0;
     } else {
       const t = 1 - this.bannerLife / this.bannerMaxLife;
       // Slams in, holds, then dissolves over the last quarter of its life.
       const fadeIn = Math.min(1, t / 0.1);
       const fadeOut = t > 0.72 ? Math.max(0, 1 - (t - 0.72) / 0.28) : 1;
-      out[G.bannerAlpha] = 0.95 * fadeIn * fadeOut;
-      out[G.bannerScale] = 1 + 0.45 * (1 - Math.min(1, t / 0.18));
-      out[G.bannerR] = this.bannerColor[0];
-      out[G.bannerG] = this.bannerColor[1];
-      out[G.bannerB] = this.bannerColor[2];
+      out[base + G.bannerAlpha] = 0.95 * fadeIn * fadeOut;
+      out[base + G.bannerScale] = 1 + 0.45 * (1 - Math.min(1, t / 0.18));
     }
   }
 
@@ -617,21 +598,14 @@ export class VfxSystem {
 
   // ---------------------------------------------------------------- packing
 
-  private packNumbers(): void {
-    this.numbersOut = new Float32Array(NUMBER_CAP * NR.STRIDE);
-    const out = this.numbersOut;
+  private packNumbers(out: Float32Array): void {
     for (let i = 0; i < NUMBER_CAP; i++) {
       const base = i * N.STRIDE;
-      const outBase = i * NR.STRIDE;
+      const outBase = VFX.numbers + i * NR.STRIDE;
       const life = this.numbers[base + N.life];
-      if (life <= 0) {
-        out[outBase + NR.a] = 0;
-        out[outBase + NR.scale] = 0;
-        continue;
-      }
+      if (life <= 0) continue; // fresh array is already zeroed
       const t = 1 - life * this.numbers[base + N.invMaxLife];
       const kind = this.numbers[base + N.kind];
-      const color = NUMBER_COLORS[kind] ?? NUMBER_COLORS[0];
       const peak = kind === KIND_CRIT ? 1.75 : 1.25;
       // Overshoot on birth, settle, then shrink slightly as it fades.
       const scale = t < 0.16 ? peak - (peak - 1) * (t / 0.16) : 1 - 0.18 * ((t - 0.16) / 0.84);
@@ -640,23 +614,17 @@ export class VfxSystem {
       out[outBase + NR.y] = this.numbers[base + N.y];
       out[outBase + NR.scale] = scale * (kind === KIND_CRIT ? 1.35 : 1);
       out[outBase + NR.a] = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35;
-      out[outBase + NR.r] = color[0];
-      out[outBase + NR.g] = color[1];
-      out[outBase + NR.b] = color[2];
+      out[outBase + NR.amount] = this.numbers[base + N.amount];
+      out[outBase + NR.kind] = kind;
     }
   }
 
-  private packBeams(): void {
-    this.beamsOut = new Float32Array(BEAM_CAP * BR.STRIDE);
-    const out = this.beamsOut;
+  private packBeams(out: Float32Array): void {
     for (let i = 0; i < BEAM_CAP; i++) {
       const base = i * B.STRIDE;
-      const outBase = i * BR.STRIDE;
+      const outBase = VFX.beams + i * BR.STRIDE;
       const life = this.beams[base + B.life];
-      if (life <= 0) {
-        out[outBase + BR.a] = 0;
-        continue;
-      }
+      if (life <= 0) continue; // fresh array is already zeroed
       const t = 1 - life * this.beams[base + B.invMaxLife];
       out[outBase + BR.x1] = this.beams[base + B.x1];
       out[outBase + BR.y1] = this.beams[base + B.y1];
@@ -667,6 +635,11 @@ export class VfxSystem {
       out[outBase + BR.crit] = this.beams[base + B.crit];
       out[outBase + BR.a] = (1 - t) ** 1.4;
     }
+  }
+
+  private packRings(out: Float32Array): void {
+    const ring = this.ringPool.buffer;
+    out.set(ring, VFX.rings);
   }
 
   // ----------------------------------------------------------------- spawns
@@ -730,23 +703,5 @@ export class VfxSystem {
     this.budget--;
     const pool = additive ? this.additive : this.normal;
     pool.spawn(x, y, vx, vy, life, size0, size1, rotVel, color, alpha, brush, drag, gravity, homeX, homeY, homing);
-  }
-
-  private setLabel(slot: number, amount: number, kind: number): void {
-    // Contact damage against the tower is small (armor/deflection eat most of
-    // it on early waves) and often lands under 1 — `formatInt` would just
-    // show "0" for every hit and read as broken. The tower's own number gets
-    // one decimal place instead; every other kind keeps the terser integer.
-    if (kind === KIND_TOWER) {
-      this.setLabelText(slot, amount.toFixed(1));
-      return;
-    }
-    this.setLabelText(slot, amount < 1000 ? formatInt(amount) : formatNumber(amount, 1));
-  }
-
-  private setLabelText(slot: number, text: string): void {
-    if (this.labels[slot] === text) return;
-    this.labels[slot] = text;
-    this.labelsDirty = true;
   }
 }

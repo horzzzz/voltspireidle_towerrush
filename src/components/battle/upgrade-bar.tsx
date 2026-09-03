@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UpgradeRow } from './upgrade-row';
 import type { UpgradeId } from '@/game/core/types';
 import { useBattleStore } from '@/game/state/battle-store';
-import { UPGRADE_DEFS, UPGRADE_ORDER } from '@/game/data/tower-stats';
+import { isUpgradeMaxed, upgradeCost, UPGRADE_DEFS, UPGRADE_ORDER } from '@/game/data/tower-stats';
 
 type UpgradeBarProps = { onBuy: (id: UpgradeId) => void };
 
@@ -29,16 +29,24 @@ export function UpgradeBar({ onBuy }: UpgradeBarProps) {
       style={styles.scroll}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 8 }]}
       showsVerticalScrollIndicator={false}>
-      {visibleOrder.map((id) => (
-        <UpgradeRow
-          key={id}
-          def={UPGRADE_DEFS[id]}
-          level={levels[id]}
-          charge={charge}
-          loadout={loadout}
-          onBuy={() => onBuy(id)}
-        />
-      ))}
+      {visibleOrder.map((id) => {
+        const def = UPGRADE_DEFS[id];
+        const level = levels[id];
+        const maxed = isUpgradeMaxed(def, level);
+        const cost = maxed ? null : upgradeCost(def, level);
+        return (
+          <UpgradeRow
+            key={id}
+            id={id}
+            def={def}
+            level={level}
+            cost={cost}
+            affordable={cost != null && charge >= cost}
+            loadout={loadout}
+            onBuy={onBuy}
+          />
+        );
+      })}
     </ScrollView>
   );
 }

@@ -43,8 +43,16 @@ export class RewardFxSystem {
   private readonly normal: ParticlePool;
   private readonly rings = new RingPool(UI_RING_CAP);
 
-  private readonly globalsOut = [new Float32Array(UG.STRIDE), new Float32Array(UG.STRIDE)];
-  private flip = 0;
+  /**
+   * Fresh every `update()`, deliberately — see `ParticlePool`'s own note in
+   * pools.ts on why reusing (even a rotating pair of) fixed output buffers
+   * and mutating them in place silently breaks Reanimated's cross-thread
+   * propagation here: the shareable cache keys off the array's own object
+   * identity, so a `sharedValue.value = buffer` assignment only actually
+   * reaches the UI thread the first two times a two-buffer rotation is used,
+   * then never again.
+   */
+  private globalsOut = new Float32Array(UG.STRIDE);
 
   private raysLife = 0;
   private raysMaxLife = 1;
@@ -76,7 +84,7 @@ export class RewardFxSystem {
     return this.rings.buffer;
   }
   get globalsBuffer(): Float32Array {
-    return this.globalsOut[this.flip];
+    return this.globalsOut;
   }
 
   reset(): void {
@@ -168,12 +176,12 @@ export class RewardFxSystem {
   }
 
   update(dt: number): void {
-    this.flip ^= 1;
     this.additive.update(dt);
     this.normal.update(dt);
     this.rings.update(dt);
 
-    const out = this.globalsOut[this.flip];
+    const out = new Float32Array(UG.STRIDE);
+    this.globalsOut = out;
     this.raysRotation += dt * 0.55;
     this.raysLife = Math.max(0, this.raysLife - dt);
     if (this.raysLife <= 0) {

@@ -5,9 +5,8 @@ import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import { ARENA_HEIGHT, ARENA_WIDTH, ATTACK_RANGE, TOWER_X, TOWER_Y } from '@/game/data/arena';
 import { getSkin } from '@/game/data/skins';
 import { useMetaStore } from '@/game/state/meta-store';
-import { ADDITIVE_CAP, G, NORMAL_CAP } from '@/game/vfx/layout';
+import { ADDITIVE_CAP, G, NORMAL_CAP, VFX } from '@/game/vfx/layout';
 import { EnemyAtlas } from './enemy-atlas';
-import { TowerHealthRing } from './tower-health-ring';
 import { ParticleLayer } from './vfx/particle-layer';
 import { VfxPicture } from './vfx/vfx-picture';
 
@@ -27,12 +26,8 @@ type Props = {
   vfx: {
     additive: SharedValue<Float32Array>;
     normal: SharedValue<Float32Array>;
-    numbers: SharedValue<Float32Array>;
-    beams: SharedValue<Float32Array>;
-    rings: SharedValue<Float32Array>;
-    globals: SharedValue<Float32Array>;
-    labels: SharedValue<string[]>;
-    banner: SharedValue<string>;
+    /** Globals + numbers + beams + rings, packed at the VFX offsets (layout.ts). */
+    buffer: SharedValue<Float32Array>;
   };
 };
 
@@ -55,15 +50,15 @@ export function BattleCanvas({ buffers, vfx }: Props) {
   // The tower alone carries the firing recoil, on top of whatever the scene
   // group is already doing.
   const towerTransform = useDerivedValue(() => [
-    { translateX: vfx.globals.value[G.recoilX] },
-    { translateY: vfx.globals.value[G.recoilY] },
+    { translateX: vfx.buffer.value[VFX.globals + G.recoilX] },
+    { translateY: vfx.buffer.value[VFX.globals + G.recoilY] },
   ]);
 
   const sceneTransform = useDerivedValue(
     () => [
       { scale },
-      { translateX: vfx.globals.value[G.shakeX] },
-      { translateY: vfx.globals.value[G.shakeY] },
+      { translateX: vfx.buffer.value[VFX.globals + G.shakeX] },
+      { translateY: vfx.buffer.value[VFX.globals + G.shakeY] },
     ],
     [scale],
   );
@@ -91,8 +86,6 @@ export function BattleCanvas({ buffers, vfx }: Props) {
             </Group>
           )}
 
-          <TowerHealthRing />
-
           <EnemyAtlas kind="scavenger" buffer={buffers.scavenger} />
           <EnemyAtlas kind="hulk" buffer={buffers.hulk} />
           <EnemyAtlas kind="runner" buffer={buffers.runner} />
@@ -106,14 +99,7 @@ export function BattleCanvas({ buffers, vfx }: Props) {
           <ParticleLayer buffer={vfx.normal} capacity={NORMAL_CAP} />
           <ParticleLayer buffer={vfx.additive} capacity={ADDITIVE_CAP} additive />
 
-          <VfxPicture
-            numbers={vfx.numbers}
-            numberLabels={vfx.labels}
-            beams={vfx.beams}
-            rings={vfx.rings}
-            globals={vfx.globals}
-            banner={vfx.banner}
-          />
+          <VfxPicture vfx={vfx.buffer} />
         </Group>
       )}
     </Canvas>

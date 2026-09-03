@@ -53,16 +53,16 @@ export function useBattleEngine(loadout: RunLoadout) {
 
   const vfxAdditive = useSharedValue(vfx.additiveBuffer);
   const vfxNormal = useSharedValue(vfx.normalBuffer);
-  const vfxNumbers = useSharedValue(vfx.numbersBuffer);
-  const vfxBeams = useSharedValue(vfx.beamsBuffer);
-  const vfxRings = useSharedValue(vfx.ringsBuffer);
-  const vfxGlobals = useSharedValue(vfx.globalsBuffer);
-  const vfxLabels = useSharedValue(vfx.numberLabels);
-  const vfxBanner = useSharedValue(vfx.banner);
+  // Globals + numbers + beams + rings, one buffer — see VfxSystem/layout.ts's
+  // own note on why these no longer publish as four separate shared values.
+  const vfxBuffer = useSharedValue(vfx.buffer);
 
   const lastFrameRef = useRef<number | null>(null);
   const lastPublishRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  // __DEV__-only frame timing — see the perf notes in the two useEffect
+  // blocks below. No-ops (and is dead-code-eliminated) in production.
+  const perfRef = useRef({ sim: 0, vfxUpdate: 0, pack: 0, assign: 0, samples: 0, lastLog: 0 });
 
   useEffect(() => {
     publish(worldRef.current);
@@ -73,7 +73,11 @@ export function useBattleEngine(loadout: RunLoadout) {
       const dt = last == null ? 0 : Math.min(MAX_FRAME_DT, (now - last) / 1000);
 
       const world = worldRef.current;
+      const perf = __DEV__ ? perfRef.current : null;
+
+      const t0 = perf ? performance.now() : 0;
       if (dt > 0) advanceSimulation(world, dt);
+      const t1 = perf ? performance.now() : 0;
 
       // Effects run on the sim's clock, not the wall clock — at x3 a burst
       // has to clear three times as fast or the field silts up.
@@ -84,8 +88,11 @@ export function useBattleEngine(loadout: RunLoadout) {
         hpFraction: maxHealth > 0 ? world.tower.health / maxHealth : 0,
       });
       events.length = 0;
+      const t2 = perf ? performance.now() : 0;
 
       const packed = packEnemyBuffers(world, ENEMY_RENDER_SCALE, BOSS_RENDER_SCALE);
+      const t3 = perf ? performance.now() : 0;
+
       scavengerBuffer.value = packed.scavenger;
       hulkBuffer.value = packed.hulk;
       runnerBuffer.value = packed.runner;
@@ -95,12 +102,30 @@ export function useBattleEngine(loadout: RunLoadout) {
 
       vfxAdditive.value = vfx.additiveBuffer;
       vfxNormal.value = vfx.normalBuffer;
-      vfxNumbers.value = vfx.numbersBuffer;
-      vfxBeams.value = vfx.beamsBuffer;
-      vfxRings.value = vfx.ringsBuffer;
-      vfxGlobals.value = vfx.globalsBuffer;
-      if (vfxLabels.value !== vfx.numberLabels) vfxLabels.value = vfx.numberLabels;
-      if (vfxBanner.value !== vfx.banner) vfxBanner.value = vfx.banner;
+      vfxBuffer.value = vfx.buffer;
+
+      if (perf) {
+        const t4 = performance.now();
+        perf.sim += t1 - t0;
+        perf.vfxUpdate += t2 - t1;
+        perf.pack += t3 - t2;
+        perf.assign += t4 - t3;
+        perf.samples++;
+        if (now - perf.lastLog >= 2000 && perf.samples > 0) {
+          const n = perf.samples;
+          console.log(
+            `[vfx-perf] sim ${(perf.sim / n).toFixed(2)}ms  vfx ${(perf.vfxUpdate / n).toFixed(2)}ms  ` +
+              `pack ${(perf.pack / n).toFixed(2)}ms  assign ${(perf.assign / n).toFixed(2)}ms  ` +
+              `enemies ${world.enemies.length}  fps~${(1000 / ((now - (perf.lastLog || now)) / n)).toFixed(0)}`,
+          );
+          perf.sim = 0;
+          perf.vfxUpdate = 0;
+          perf.pack = 0;
+          perf.assign = 0;
+          perf.samples = 0;
+          perf.lastLog = now;
+        }
+      }
 
       if (now - lastPublishRef.current >= PUBLISH_INTERVAL_MS) {
         lastPublishRef.current = now;
@@ -158,12 +183,7 @@ export function useBattleEngine(loadout: RunLoadout) {
     vfx: {
       additive: vfxAdditive,
       normal: vfxNormal,
-      numbers: vfxNumbers,
-      beams: vfxBeams,
-      rings: vfxRings,
-      globals: vfxGlobals,
-      labels: vfxLabels,
-      banner: vfxBanner,
+      buffer: vfxBuffer,
     },
     actions,
   };
