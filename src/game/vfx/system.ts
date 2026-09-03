@@ -17,8 +17,8 @@ import {
   NR,
   NUMBER_CAP,
   RING_CAP,
-  VFX,
 } from './layout';
+import { BSec, secCount, secOffset } from './frame-buffer';
 import { ParticlePool, RingPool } from './pools';
 import { BOSS_ACCENT, ENEMY_ACCENT, VfxColors, type Rgb } from './palette';
 
@@ -55,21 +55,18 @@ function sparkColor(rng: Rng, isCrit: boolean): Rgb {
 
 /**
  * The whole battle VFX layer: fixed particle / number / beam / ring pools,
- * advanced once per rendered frame and packed into flat `Float32Array`s that
- * Skia reads on the UI thread.
+ * advanced once per rendered frame and packed into the frame buffer Skia
+ * reads on the UI thread.
  *
  * Deliberately plain TypeScript with no React, no Skia and no Reanimated
- * imports — the same rule the sim itself follows. It owns no timers and no
- * loop; `use-battle-engine`'s existing rAF drives it, right next to the enemy
- * position packing.
+ * imports — the same rule the sim itself follows. It owns no timers, no loop
+ * and no output buffer; `use-battle-engine`'s existing rAF drives it, sizes
+ * one frame buffer from the live counts below, and hands it here to fill.
  *
- * Globals, numbers, beams and rings are packed into ONE `Float32Array` (see
- * `VFX` in layout.ts) rather than four — publishing a shared value has a real
- * per-call cost (see pools.ts's note on why the buffer must be a fresh
- * reference each frame), so four small arrays paid that cost four times for
- * a couple KB of data combined. The two particle pools stay separate: they
- * are the two buffers actually large enough (tens of KB) for the
- * fresh-allocation cost itself to matter more than the per-call overhead.
+ * Nothing in this class allocates per frame: pools integrate in place, and
+ * `packInto` writes into memory the caller already owns. That matters more
+ * than it sounds — see vfx/frame-buffer.ts for the measurement that made
+ * per-frame allocation the thing worth designing around.
  */
 export class VfxSystem {
   private readonly rng: Rng;
@@ -82,11 +79,14 @@ export class VfxSystem {
   private readonly beams = new Float32Array(BEAM_CAP * B.STRIDE);
 
   /**
-   * Fresh every `update()` — see `ParticlePool`'s note in vfx/pools.ts on why
-   * reusing a fixed pair and mutating in place silently breaks Reanimated's
-   * cross-thread propagation here.
+   * Screen-wide state, recomputed by `update` and copied into the frame buffer
+   * by `packInto`. Owned here and reused forever: it never crosses a thread on
+   * its own, so none of the fresh-array rules in vfx/frame-buffer.ts apply.
    */
-  private out = new Float32Array(VFX.SIZE);
+  private readonly globals = new Float32Array(G.STRIDE);
+
+  private numberAliveCount = 0;
+  private beamAliveCount = 0;
 
   private time = 0;
   private trauma = 0;
@@ -98,6 +98,8 @@ export class VfxSystem {
   private recoilY = 0;
   private bannerLife = 0;
   private bannerMaxLife = 1;
+  private bannerWave = 0;
+  private bannerBoss = false;
 
   /** 1 = full detail, falls toward 0.3 as the field (or a pool) fills up. */
   private detail = 1;
@@ -111,10 +113,15 @@ export class VfxSystem {
   }
 
   /**
-   * Advances every pool by `dt` simulated seconds and turns `events` into new
-   * effects. Call once per rendered frame, before reading the buffers.
+   * Advances every pool by `dt` simulated seconds and turns the first
+   * `eventCount` entries of `events` into new effects. Call once per rendered
+   * frame, before reading the buffers.
+   *
+   * `eventCount` rather than `events.length`: the queue pools its records and
+   * never shrinks (see core/types.ts `emitVfx`), so the array's length is the
+   * high-water mark, not what happened this frame.
    */
-  update(dt: number, events: VfxEvent[], ctx: Ctx): void {
+  update(dt: number, events: VfxEvent[], eventCount: number, ctx: Ctx): void {
     this.time += dt;
     // A frame that is already slow gets half the spawn budget — otherwise a
     // device struggling to keep up spawns just as much as one running at 60,
@@ -131,21 +138,47 @@ export class VfxSystem {
     );
     this.detail = load <= 0.6 ? 1 : Math.max(0.3, 1 - (load - 0.6) * 1.6);
 
-    for (let i = 0; i < events.length; i++) this.ingest(events[i]);
+    for (let i = 0; i < eventCount; i++) this.ingest(events[i]);
 
     this.ambient(dt);
-    this.additive.update(dt);
-    this.normal.update(dt);
-    this.ringPool.update(dt);
+    this.additive.integrate(dt);
+    this.normal.integrate(dt);
+    this.ringPool.integrate(dt);
     this.integrateNumbers(dt);
     this.integrateBeams(dt);
+    this.integrateGlobals(dt, ctx);
+  }
 
-    const out = new Float32Array(VFX.SIZE);
-    this.packGlobals(dt, ctx, out);
-    this.packNumbers(out);
-    this.packBeams(out);
-    this.packRings(out);
-    this.out = out;
+  /**
+   * Copies this frame's effects into the caller's frame buffer, at the
+   * offsets its header already reserved. Split from `update` because the
+   * buffer cannot be sized until every pool has finished integrating and
+   * knows its live count — see vfx/frame-buffer.ts.
+   */
+  packInto(out: Float32Array): void {
+    if (secCount(out, BSec.globals) > 0) out.set(this.globals, secOffset(out, BSec.globals));
+    this.additive.pack(out, secOffset(out, BSec.additive), secCount(out, BSec.additive));
+    this.normal.pack(out, secOffset(out, BSec.normal), secCount(out, BSec.normal));
+    this.ringPool.pack(out, secOffset(out, BSec.rings), secCount(out, BSec.rings));
+    this.packNumbers(out, secOffset(out, BSec.numbers), secCount(out, BSec.numbers));
+    this.packBeams(out, secOffset(out, BSec.beams), secCount(out, BSec.beams));
+  }
+
+  /** Live-entry counts, valid after `update` — what the frame builder sizes each section from. */
+  get additiveAlive(): number {
+    return this.additive.alive;
+  }
+  get normalAlive(): number {
+    return this.normal.alive;
+  }
+  get ringAlive(): number {
+    return this.ringPool.alive;
+  }
+  get numberAlive(): number {
+    return this.numberAliveCount;
+  }
+  get beamAlive(): number {
+    return this.beamAliveCount;
   }
 
   /** Fully resets every pool — used when a run restarts in place. */
@@ -161,24 +194,17 @@ export class VfxSystem {
     this.recoilX = 0;
     this.recoilY = 0;
     this.bannerLife = 0;
+    this.globals.fill(0);
+    this.numberAliveCount = 0;
+    this.beamAliveCount = 0;
   }
 
-  get additiveBuffer(): Float32Array {
-    return this.additive.buffer;
-  }
-  get normalBuffer(): Float32Array {
-    return this.normal.buffer;
-  }
-  /** Globals + numbers + beams + rings, packed at the offsets in `VFX` (layout.ts). */
-  get buffer(): Float32Array {
-    return this.out;
-  }
   // ---------------------------------------------------------------- events
 
   private ingest(event: VfxEvent): void {
     switch (event.type) {
       case 'bolt':
-        this.onBolt(event.x1, event.y1, event.x2, event.y2, event.isCrit);
+        this.onBolt(event.x, event.y, event.x2, event.y2, event.isCrit);
         break;
       case 'hit':
         this.onHit(event.x, event.y, event.dirX, event.dirY, event.radius, event.isCrit);
@@ -204,7 +230,7 @@ export class VfxSystem {
         this.onTowerHit(event.x, event.y, event.dirX, event.dirY, event.amount);
         break;
       case 'waveStart':
-        this.onWaveStart(event.isBoss);
+        this.onWaveStart(event.wave, event.isBoss);
         break;
       case 'upgrade':
         this.onUpgrade();
@@ -287,7 +313,7 @@ export class VfxSystem {
     if (isCrit) this.trauma = Math.min(1, this.trauma + 0.12);
   }
 
-  private onKill(event: Extract<VfxEvent, { type: 'kill' }>): void {
+  private onKill(event: VfxEvent): void {
     const { x, y, radius, isBoss } = event;
     const accent = isBoss
       ? (BOSS_ACCENT[event.bossVariant] ?? BOSS_ACCENT[0])
@@ -416,7 +442,9 @@ export class VfxSystem {
     this.trauma = Math.min(1, this.trauma + 0.22);
   }
 
-  private onWaveStart(isBoss: boolean): void {
+  private onWaveStart(wave: number, isBoss: boolean): void {
+    this.bannerWave = wave;
+    this.bannerBoss = isBoss;
     this.ringPool.spawn(
       TOWER_X,
       TOWER_Y,
@@ -503,6 +531,7 @@ export class VfxSystem {
   // ------------------------------------------------------------ integration
 
   private integrateNumbers(dt: number): void {
+    let alive = 0;
     for (let i = 0; i < NUMBER_CAP; i++) {
       const base = i * N.STRIDE;
       const life = this.numbers[base + N.life];
@@ -513,28 +542,35 @@ export class VfxSystem {
         continue;
       }
       this.numbers[base + N.life] = left;
+      alive++;
       // Rises fast, then eases out — the arc reads as "thrown off the body".
       this.numbers[base + N.vy] *= Math.max(0, 1 - 1.7 * dt);
       this.numbers[base + N.x] += this.numbers[base + N.vx] * dt;
       this.numbers[base + N.y] += this.numbers[base + N.vy] * dt;
     }
+    this.numberAliveCount = alive;
   }
 
   private integrateBeams(dt: number): void {
+    let alive = 0;
     for (let i = 0; i < BEAM_CAP; i++) {
       const base = i * B.STRIDE;
       const life = this.beams[base + B.life];
       if (life <= 0) continue;
-      this.beams[base + B.life] = life - dt <= 0 ? 0 : life - dt;
+      const left = life - dt;
+      this.beams[base + B.life] = left <= 0 ? 0 : left;
+      if (left > 0) alive++;
     }
+    this.beamAliveCount = alive;
   }
 
-  private packGlobals(dt: number, ctx: Ctx, out: Float32Array): void {
+  private integrateGlobals(dt: number, ctx: Ctx): void {
     this.trauma = Math.max(0, this.trauma - dt * 1.9);
     this.hurt = Math.max(0, this.hurt - dt * 2.1);
     this.flash = Math.max(0, this.flash - dt * 5.5);
 
-    const base = VFX.globals;
+    const out = this.globals;
+    const base = 0;
     const shake = this.trauma * this.trauma * MAX_SHAKE;
     out[base + G.shakeX] = shake * Math.sin(this.time * 43 + this.shakeSeed);
     out[base + G.shakeY] = shake * Math.sin(this.time * 37.3 + this.shakeSeed * 1.7);
@@ -558,6 +594,8 @@ export class VfxSystem {
     out[base + G.recoilY] = this.recoilY;
 
     this.bannerLife = Math.max(0, this.bannerLife - dt);
+    out[base + G.bannerWave] = this.bannerWave;
+    out[base + G.bannerBoss] = this.bannerBoss ? 1 : 0;
     if (this.bannerLife <= 0) {
       out[base + G.bannerAlpha] = 0;
       out[base + G.bannerScale] = 0;
@@ -598,12 +636,14 @@ export class VfxSystem {
 
   // ---------------------------------------------------------------- packing
 
-  private packNumbers(out: Float32Array): void {
-    for (let i = 0; i < NUMBER_CAP; i++) {
+  private packNumbers(out: Float32Array, offset: number, limit: number): void {
+    let written = 0;
+    for (let i = 0; i < NUMBER_CAP && written < limit; i++) {
       const base = i * N.STRIDE;
-      const outBase = VFX.numbers + i * NR.STRIDE;
       const life = this.numbers[base + N.life];
-      if (life <= 0) continue; // fresh array is already zeroed
+      if (life <= 0) continue;
+      const outBase = offset + written * NR.STRIDE;
+      written++;
       const t = 1 - life * this.numbers[base + N.invMaxLife];
       const kind = this.numbers[base + N.kind];
       const peak = kind === KIND_CRIT ? 1.75 : 1.25;
@@ -619,12 +659,14 @@ export class VfxSystem {
     }
   }
 
-  private packBeams(out: Float32Array): void {
-    for (let i = 0; i < BEAM_CAP; i++) {
+  private packBeams(out: Float32Array, offset: number, limit: number): void {
+    let written = 0;
+    for (let i = 0; i < BEAM_CAP && written < limit; i++) {
       const base = i * B.STRIDE;
-      const outBase = VFX.beams + i * BR.STRIDE;
       const life = this.beams[base + B.life];
-      if (life <= 0) continue; // fresh array is already zeroed
+      if (life <= 0) continue;
+      const outBase = offset + written * BR.STRIDE;
+      written++;
       const t = 1 - life * this.beams[base + B.invMaxLife];
       out[outBase + BR.x1] = this.beams[base + B.x1];
       out[outBase + BR.y1] = this.beams[base + B.y1];
@@ -635,11 +677,6 @@ export class VfxSystem {
       out[outBase + BR.crit] = this.beams[base + B.crit];
       out[outBase + BR.a] = (1 - t) ** 1.4;
     }
-  }
-
-  private packRings(out: Float32Array): void {
-    const ring = this.ringPool.buffer;
-    out.set(ring, VFX.rings);
   }
 
   // ----------------------------------------------------------------- spawns

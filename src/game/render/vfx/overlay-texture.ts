@@ -1,7 +1,8 @@
 import { Skia, TileMode, createPicture, usePictureAsTexture } from '@shopify/react-native-skia';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { VfxColors } from '@/game/vfx/palette';
+import { perfEvent } from '../perf-monitor';
 
 /**
  * Baked at a fraction of the arena's real size — a radial gradient has no
@@ -10,6 +11,8 @@ import { VfxColors } from '@/game/vfx/palette';
  */
 const TEX_WIDTH = 216;
 const TEX_HEIGHT = 466;
+
+export const VIGNETTE_TEX_SIZE = { width: TEX_WIDTH, height: TEX_HEIGHT } as const;
 
 /**
  * The low-HP / just-hurt vignette, baked into a texture once instead of
@@ -44,7 +47,16 @@ export function useVignetteTexture() {
       }, { width: TEX_WIDTH, height: TEX_HEIGHT }),
     [],
   );
-  return usePictureAsTexture(picture, { width: TEX_WIDTH, height: TEX_HEIGHT });
+  // `VIGNETTE_TEX_SIZE`, not a fresh `{ width, height }` literal:
+  // `usePictureAsTexture`'s effect has `size` in its dependency list, so an
+  // inline object made it re-create an offscreen GPU surface and re-snapshot
+  // it on every render of this hook — for a picture that never changes.
+  const texture = usePictureAsTexture(picture, VIGNETTE_TEX_SIZE);
+
+  useEffect(() => {
+    perfEvent('vignette', 'rebake');
+  }, [picture]);
+
+  return texture;
 }
 
-export const VIGNETTE_TEX_SIZE = { width: TEX_WIDTH, height: TEX_HEIGHT } as const;

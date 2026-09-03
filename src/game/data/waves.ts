@@ -39,7 +39,26 @@ export interface WaveConfig {
 
 export { isBossWave };
 
+/**
+ * One-entry memo. `tickWorld` asks for the current wave's config every single
+ * tick — 180 times a second at x3 — and the config only ever changes when the
+ * wave or the run's Voltage does, so rebuilding three objects per tick was
+ * pure garbage. The entry is immutable and shared; callers must not mutate it.
+ */
+let cachedConfig: WaveConfig | null = null;
+let cachedWave = -1;
+let cachedVoltage = -1;
+
 export function getWaveConfig(wave: number, voltage = 1): WaveConfig {
+  if (cachedConfig !== null && cachedWave === wave && cachedVoltage === voltage) return cachedConfig;
+  const config = buildWaveConfig(wave, voltage);
+  cachedConfig = config;
+  cachedWave = wave;
+  cachedVoltage = voltage;
+  return config;
+}
+
+function buildWaveConfig(wave: number, voltage: number): WaveConfig {
   const boss = isBossWave(wave);
   const regularCount = enemyCountForWave(wave);
 

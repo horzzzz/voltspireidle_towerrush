@@ -2,12 +2,16 @@ import { Atlas, useColorBuffer, useRSXformBuffer, useRectBuffer } from '@shopify
 import { memo } from 'react';
 import type { SharedValue } from 'react-native-reanimated';
 
+import { secCount, secOffset } from '@/game/vfx/frame-buffer';
 import { BRUSH_CELL, PR } from '@/game/vfx/layout';
 import { useBrushAtlas } from './brush-atlas';
 
 type Props = {
-  /** Packed [x, y, size, rot, r, g, b, a, brush] × capacity — see vfx/layout.ts. */
-  buffer: SharedValue<Float32Array>;
+  /** A frame buffer (vfx/frame-buffer.ts) holding this layer's particle section. */
+  frame: SharedValue<Float32Array>;
+  /** Which section inside it — `BSec.additive`, `USec.normal`, … */
+  section: number;
+  /** Atlas slot count. Fixed for the layer's lifetime; live particles fill it from the front. */
   capacity: number;
   /** 'plus' for glowing effects, 'srcOver' for solid debris. */
   additive?: boolean;
@@ -20,29 +24,35 @@ type Props = {
  * `sprites` (which procedural brush cell) and `colors` (tint *and* alpha, via
  * `colorBlendMode="modulate"` against the all-white sheet).
  *
- * Three Reanimated mappers per layer, fixed. A dead slot writes size 0, which
- * collapses its quad to nothing.
+ * Three Reanimated mappers per layer, fixed. Slots past the section's live
+ * count write size 0, which collapses their quads to nothing.
  */
 /**
- * Memoized for the same reason as `EnemyAtlas`: `buffer` is a stable
+ * Memoized for the same reason as `EnemyAtlas`: `frame` is a stable
  * SharedValue for the battle's lifetime, and this component registers THREE
  * buffer-hook mappers (sprites/transforms/colors) — the most of any node in
  * the scene — so an unmemoized re-render here is the single biggest source
  * of avoidable Reanimated mapper churn (and strict-mode log spam) per frame.
  */
-export const ParticleLayer = memo(function ParticleLayer({ buffer, capacity, additive }: Props) {
+export const ParticleLayer = memo(function ParticleLayer({ frame, section, capacity, additive }: Props) {
   const image = useBrushAtlas();
 
   const sprites = useRectBuffer(capacity, (val, i) => {
     'worklet';
-    const brush = buffer.value[i * PR.STRIDE + PR.brush];
+    const data = frame.value;
+    const brush = i < secCount(data, section) ? data[secOffset(data, section) + i * PR.STRIDE + PR.brush] : 0;
     val.setXYWH(brush * BRUSH_CELL, 0, BRUSH_CELL, BRUSH_CELL);
   });
 
   const transforms = useRSXformBuffer(capacity, (val, i) => {
     'worklet';
-    const data = buffer.value;
-    const base = i * PR.STRIDE;
+    const data = frame.value;
+    // Past the live count the section holds nothing; size 0 hides the slot.
+    if (i >= secCount(data, section)) {
+      val.set(0, 0, 0, 0);
+      return;
+    }
+    const base = secOffset(data, section) + i * PR.STRIDE;
     const scale = data[base + PR.size] / BRUSH_CELL;
     const rot = data[base + PR.rot];
     const scos = Math.cos(rot) * scale;
@@ -54,8 +64,15 @@ export const ParticleLayer = memo(function ParticleLayer({ buffer, capacity, add
 
   const colors = useColorBuffer(capacity, (val, i) => {
     'worklet';
-    const data = buffer.value;
-    const base = i * PR.STRIDE;
+    const data = frame.value;
+    if (i >= secCount(data, section)) {
+      val[0] = 0;
+      val[1] = 0;
+      val[2] = 0;
+      val[3] = 0;
+      return;
+    }
+    const base = secOffset(data, section) + i * PR.STRIDE;
     val[0] = data[base + PR.r];
     val[1] = data[base + PR.g];
     val[2] = data[base + PR.b];

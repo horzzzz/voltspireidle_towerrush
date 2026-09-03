@@ -1,5 +1,6 @@
 import { Rng } from '../core/rng';
-import { Brush, UG, UI_ADDITIVE_CAP, UI_NORMAL_CAP, UI_RING_CAP } from './layout';
+import { buildFrame, secCount, secOffset, USEC_COUNT, USec } from './frame-buffer';
+import { Brush, PR, RR, UG, UI_ADDITIVE_CAP, UI_NORMAL_CAP, UI_RING_CAP } from './layout';
 import { ParticlePool, RingPool } from './pools';
 import { VfxColors, type Rgb } from './palette';
 
@@ -14,6 +15,23 @@ export interface RewardFxRequest {
   to?: { x: number; y: number } | null;
   /** 1 = an ordinary claim. Above that the burst scales up. */
   power?: number;
+}
+
+/** Floats per entry in each reward-overlay section, indexed by `USec`. */
+const REWARD_STRIDES = (() => {
+  const strides = new Int32Array(USEC_COUNT);
+  strides[USec.globals] = UG.STRIDE;
+  strides[USec.additive] = PR.STRIDE;
+  strides[USec.normal] = PR.STRIDE;
+  strides[USec.rings] = RR.STRIDE;
+  return strides;
+})();
+
+/** Seed frame: globals present (readers index into it before the first update), everything else empty. */
+function emptyRewardFrame(): Float32Array {
+  const counts = new Int32Array(USEC_COUNT);
+  counts[USec.globals] = 1;
+  return buildFrame(counts, REWARD_STRIDES, USEC_COUNT);
 }
 
 const KIND_COLORS: Record<RewardFxKind, Rgb> = {
@@ -44,15 +62,16 @@ export class RewardFxSystem {
   private readonly rings = new RingPool(UI_RING_CAP);
 
   /**
-   * Fresh every `update()`, deliberately — see `ParticlePool`'s own note in
-   * pools.ts on why reusing (even a rotating pair of) fixed output buffers
-   * and mutating them in place silently breaks Reanimated's cross-thread
-   * propagation here: the shareable cache keys off the array's own object
-   * identity, so a `sharedValue.value = buffer` assignment only actually
-   * reaches the UI thread the first two times a two-buffer rotation is used,
-   * then never again.
+   * Screen-wide state (rays, flash), reused across frames and copied into the
+   * frame buffer by `update`.
    */
-  private globalsOut = new Float32Array(UG.STRIDE);
+  private readonly globals = new Float32Array(UG.STRIDE);
+
+  /** Scratch for `buildFrame`; never crosses a thread, so never reallocated. */
+  private readonly counts = new Int32Array(USEC_COUNT);
+
+  /** The frame the last `update` produced — one exactly-sized array, same contract as the battle scene (frame-buffer.ts). */
+  private out = emptyRewardFrame();
 
   private raysLife = 0;
   private raysMaxLife = 1;
@@ -74,17 +93,9 @@ export class RewardFxSystem {
     return this.additive.alive > 0 || this.normal.alive > 0 || this.rings.alive > 0 || this.raysLife > 0 || this.flashLife > 0;
   }
 
-  get additiveBuffer(): Float32Array {
-    return this.additive.buffer;
-  }
-  get normalBuffer(): Float32Array {
-    return this.normal.buffer;
-  }
-  get ringsBuffer(): Float32Array {
-    return this.rings.buffer;
-  }
-  get globalsBuffer(): Float32Array {
-    return this.globalsOut;
+  /** Particles, rings and globals for the last `update`, in one frame buffer. */
+  get buffer(): Float32Array {
+    return this.out;
   }
 
   reset(): void {
@@ -176,12 +187,11 @@ export class RewardFxSystem {
   }
 
   update(dt: number): void {
-    this.additive.update(dt);
-    this.normal.update(dt);
-    this.rings.update(dt);
+    this.additive.integrate(dt);
+    this.normal.integrate(dt);
+    this.rings.integrate(dt);
 
-    const out = new Float32Array(UG.STRIDE);
-    this.globalsOut = out;
+    const out = this.globals;
     this.raysRotation += dt * 0.55;
     this.raysLife = Math.max(0, this.raysLife - dt);
     if (this.raysLife <= 0) {
@@ -203,5 +213,20 @@ export class RewardFxSystem {
     out[UG.flashR] = this.flashColor[0];
     out[UG.flashG] = this.flashColor[1];
     out[UG.flashB] = this.flashColor[2];
+
+    // Size the frame to what is actually alive, then fill it — an idle menu
+    // publishes a 12-float header plus globals and nothing else.
+    const counts = this.counts;
+    counts[USec.globals] = 1;
+    counts[USec.additive] = this.additive.alive;
+    counts[USec.normal] = this.normal.alive;
+    counts[USec.rings] = this.rings.alive;
+
+    const frame = buildFrame(counts, REWARD_STRIDES, USEC_COUNT);
+    frame.set(this.globals, secOffset(frame, USec.globals));
+    this.additive.pack(frame, secOffset(frame, USec.additive), secCount(frame, USec.additive));
+    this.normal.pack(frame, secOffset(frame, USec.normal), secCount(frame, USec.normal));
+    this.rings.pack(frame, secOffset(frame, USec.rings), secCount(frame, USec.rings));
+    this.out = frame;
   }
 }

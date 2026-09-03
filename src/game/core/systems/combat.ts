@@ -18,9 +18,14 @@ import type { Enemy, WorldState } from '../types';
 const HIT_FLASH_SECONDS = 0.12;
 
 function findNearestTarget(world: WorldState): Enemy | null {
+  const enemies = world.enemies;
   let best: Enemy | null = null;
   let bestDist = Infinity;
-  for (const enemy of world.enemies) {
+  // Indexed rather than `for...of`: Hermes has no JIT, so iterating an array
+  // through the iterator protocol allocates a result object per step. At x3
+  // that is five such loops over the whole field, 180 times a second.
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
     if (enemy.hp <= 0) continue;
     const dist = Math.hypot(enemy.x - TOWER_X, enemy.y - TOWER_Y);
     if (dist <= ATTACK_RANGE + enemy.radius && dist < bestDist) {
@@ -47,7 +52,14 @@ function emitBolt(world: WorldState, targetX: number, targetY: number, isCrit: b
   const x2 = dist > 0 ? TOWER_X + (dx / dist) * reach : TOWER_X;
   const y2 = dist > 0 ? TOWER_Y + (dy / dist) * reach : TOWER_Y;
 
-  emitVfx(world, { type: 'bolt', x1: TOWER_X, y1: TOWER_Y, x2, y2, isCrit });
+  const event = emitVfx(world, 'bolt');
+  if (event) {
+    event.x = TOWER_X;
+    event.y = TOWER_Y;
+    event.x2 = x2;
+    event.y2 = y2;
+    event.isCrit = isCrit;
+  }
 }
 
 /**
@@ -76,16 +88,16 @@ function killEnemy(world: WorldState, enemy: Enemy, killedByCrit: boolean): void
   if (enemy.dropsGem) world.gemsCollected += 1;
   enemy.hp = 0;
 
-  emitVfx(world, {
-    type: 'kill',
-    x: enemy.x,
-    y: enemy.y,
-    radius: enemy.radius,
-    kind: enemy.kind,
-    isBoss: enemy.isBoss,
-    bossVariant: enemy.bossVariant,
-    dropsGem: enemy.dropsGem,
-  });
+  const event = emitVfx(world, 'kill');
+  if (event) {
+    event.x = enemy.x;
+    event.y = enemy.y;
+    event.radius = enemy.radius;
+    event.kind = enemy.kind;
+    event.isBoss = enemy.isBoss;
+    event.bossVariant = enemy.bossVariant;
+    event.dropsGem = enemy.dropsGem;
+  }
 }
 
 function applyDamage(world: WorldState, enemy: Enemy, amount: number, isCrit: boolean): void {
@@ -100,17 +112,25 @@ function applyDamage(world: WorldState, enemy: Enemy, amount: number, isCrit: bo
   const dirX = dist > 0 ? dx / dist : 0;
   const dirY = dist > 0 ? dy / dist : 1;
 
-  emitVfx(world, {
-    type: 'hit',
-    x: enemy.x,
-    y: enemy.y,
-    dirX,
-    dirY,
-    radius: enemy.radius,
-    isCrit,
-    isBoss: enemy.isBoss,
-  });
-  emitVfx(world, { type: 'damage', x: enemy.x, y: enemy.y, amount, isCrit, isBoss: enemy.isBoss });
+  const hit = emitVfx(world, 'hit');
+  if (hit) {
+    hit.x = enemy.x;
+    hit.y = enemy.y;
+    hit.dirX = dirX;
+    hit.dirY = dirY;
+    hit.radius = enemy.radius;
+    hit.isCrit = isCrit;
+    hit.isBoss = enemy.isBoss;
+  }
+
+  const damage = emitVfx(world, 'damage');
+  if (damage) {
+    damage.x = enemy.x;
+    damage.y = enemy.y;
+    damage.amount = amount;
+    damage.isCrit = isCrit;
+    damage.isBoss = enemy.isBoss;
+  }
 
   if (enemy.hp <= 0) killEnemy(world, enemy, isCrit);
 }
@@ -137,7 +157,9 @@ export function updateTowerAttack(world: WorldState, dt: number): void {
 export function updateContactDamage(world: WorldState, dt: number): void {
   const armor = getTowerArmor(world.tower.levels, world.loadout);
   const deflection = getTowerDeflection(world.tower.levels, world.loadout);
-  for (const enemy of world.enemies) {
+  const enemies = world.enemies;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
     if (!enemy.inContact || enemy.hp <= 0) continue;
     enemy.attackCooldown -= dt;
     if (enemy.attackCooldown > 0) continue;
@@ -151,14 +173,14 @@ export function updateContactDamage(world: WorldState, dt: number): void {
     const dx = TOWER_X - enemy.x;
     const dy = TOWER_Y - enemy.y;
     const dist = Math.hypot(dx, dy);
-    emitVfx(world, {
-      type: 'towerHit',
-      x: enemy.x,
-      y: enemy.y,
-      dirX: dist > 0 ? dx / dist : 0,
-      dirY: dist > 0 ? dy / dist : -1,
-      amount: dealt,
-    });
+    const event = emitVfx(world, 'towerHit');
+    if (event) {
+      event.x = enemy.x;
+      event.y = enemy.y;
+      event.dirX = dist > 0 ? dx / dist : 0;
+      event.dirY = dist > 0 ? dy / dist : -1;
+      event.amount = dealt;
+    }
   }
 }
 
@@ -170,7 +192,9 @@ export function updateContactDamage(world: WorldState, dt: number): void {
  */
 export function advanceEnemyTimers(world: WorldState, dt: number): void {
   const flashStep = dt / HIT_FLASH_SECONDS;
-  for (const enemy of world.enemies) {
+  const enemies = world.enemies;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
     enemy.age += dt;
     if (enemy.hitFlash > 0) enemy.hitFlash = Math.max(0, enemy.hitFlash - flashStep);
   }
@@ -187,7 +211,16 @@ export function advanceEnemyTimers(world: WorldState, dt: number): void {
  * flashed for exactly one snapshot.
  */
 export function pruneCombatState(world: WorldState): void {
-  if (world.enemies.some((e) => e.hp <= 0)) {
-    world.enemies = world.enemies.filter((e) => e.hp > 0);
+  // Compacted in place rather than `some(...)` then `filter(...)`: those two
+  // allocate a closure each (and `filter` a whole new array) on every tick a
+  // kill lands, which at x3 is 180 times a second during a wave.
+  const enemies = world.enemies;
+  let write = 0;
+  for (let read = 0; read < enemies.length; read++) {
+    const enemy = enemies[read];
+    if (enemy.hp <= 0) continue;
+    if (write !== read) enemies[write] = enemy;
+    write++;
   }
+  if (write !== enemies.length) enemies.length = write;
 }

@@ -37,7 +37,7 @@ export function buyUpgrade(world: WorldState, id: UpgradeId): BuyUpgradeResult {
     world.tower.health += delta;
   }
 
-  emitVfx(world, { type: 'upgrade' });
+  emitVfx(world, 'upgrade');
   return 'bought';
 }
 

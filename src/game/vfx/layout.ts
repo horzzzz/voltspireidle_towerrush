@@ -1,22 +1,16 @@
 /**
- * Buffer layouts shared by the VFX simulation (system.ts, JS thread) and the
- * Skia render layer (src/game/render/vfx, UI thread). Both sides index the
- * same `Float32Array`s, so every offset lives here exactly once.
+ * Per-entry strides shared by the VFX simulation (system.ts, JS thread) and
+ * the Skia render layer (src/game/render/vfx, UI thread). Both sides index the
+ * same `Float32Array`, so every field offset lives here exactly once.
  *
- * Capacities are fixed on purpose, for the same reason as the enemy atlas
- * buffers (see render/enemy-buffers.ts): Skia's `useBuffer` re-allocates its
- * buffer and rebuilds its Reanimated mapper whenever `size` changes, so a
- * pool that grew with the action would thrash on every burst. Overflow is
- * handled by round-robin reuse — a new particle displaces the oldest one —
- * which degrades smoothly instead of stalling.
+ * *Where* each pool's entries land in that array is not here — sections are
+ * laid out per frame, sized to what is alive, by vfx/frame-buffer.ts.
  *
- * Everything except the two particle pools shares ONE array (see `VFX` at the
- * bottom). Handing a shared value a `Float32Array` is not free: worklets
- * copies the bytes into a C++ vector on the JS thread and rebuilds an
- * `ArrayBuffer` + typed-array wrapper on the UI thread, per assignment. Four
- * small buffers meant paying that per-call overhead four times a frame for
- * ~2KB of data, so globals, numbers, beams and rings are packed end to end
- * and published as one.
+ * The `_CAP` capacities are the pools' own fixed sizes and the Skia atlases'
+ * slot counts: `useBuffer` re-allocates and rebuilds its Reanimated mapper
+ * whenever `size` changes, so an atlas that grew with the action would thrash
+ * on every burst. Overflow is handled by round-robin reuse — a new particle
+ * displaces the oldest one — which degrades smoothly instead of stalling.
  */
 
 /** Which procedurally-drawn brush cell in the atlas a particle uses. */
@@ -121,7 +115,7 @@ export const RR = { x: 0, y: 1, radius: 2, width: 3, r: 4, g: 5, b: 6, a: 7, STR
  * Screen-wide state: camera shake, vignette, flash, tower recoil, wave banner,
  * tower HP. Colours are gone from here on purpose — the vignette is always
  * `VfxColors.hurt` (baked into its texture, see render/vfx/overlay-texture.ts)
- * and the banner's colour is baked into the banner texture.
+ * and the banner picks its colour from `bannerBoss`.
  */
 export const G = {
   shakeX: 0,
@@ -138,19 +132,15 @@ export const G = {
   bannerScale: 8,
   /** Tower HP 0..1 — drives the HP ring, drawn straight from this buffer. */
   hp: 9,
-  STRIDE: 10,
-} as const;
-
-/**
- * Offsets, in floats, of each section inside the one combined battle VFX
- * buffer. `VFX.SIZE` is its total length.
- */
-export const VFX = {
-  globals: 0,
-  numbers: G.STRIDE,
-  beams: G.STRIDE + NUMBER_CAP * NR.STRIDE,
-  rings: G.STRIDE + NUMBER_CAP * NR.STRIDE + BEAM_CAP * BR.STRIDE,
-  SIZE: G.STRIDE + NUMBER_CAP * NR.STRIDE + BEAM_CAP * BR.STRIDE + RING_CAP * RR.STRIDE,
+  /**
+   * Which wave the banner is announcing, and whether it is a boss wave. The
+   * render layer builds the label from these on the UI thread rather than
+   * subscribing to `battle-store` — see render/vfx/vfx-picture.tsx on why the
+   * banner no longer goes through React at all.
+   */
+  bannerWave: 10,
+  bannerBoss: 11,
+  STRIDE: 12,
 } as const;
 
 /**

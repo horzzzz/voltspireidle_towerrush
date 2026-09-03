@@ -58,6 +58,7 @@ export function createWorld(seed = Date.now(), loadout: RunLoadout = defaultRunL
 
     nextEnemyId: 1,
     vfx: [],
+    vfxCount: 0,
 
     result: null,
   };

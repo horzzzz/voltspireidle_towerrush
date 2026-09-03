@@ -30,7 +30,7 @@ export default function BattleScreen() {
     [],
   );
 
-  const { buffers, vfx, actions } = useBattleEngine(loadout);
+  const { frame, actions } = useBattleEngine(loadout);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const result = useBattleStore((s) => s.result);
   const bankRun = useMetaStore((s) => s.bankRun);
@@ -69,7 +69,7 @@ export default function BattleScreen() {
 
   return (
     <View style={styles.container}>
-      <BattleCanvas buffers={buffers} vfx={vfx} />
+      <BattleCanvas frame={frame} />
 
       <View style={styles.overlay} pointerEvents="box-none">
         <HudTop onSettingsPress={() => setSettingsVisible(true)} onSetSpeed={actions.setSpeed} />

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -16,13 +17,19 @@ type UpgradeBarProps = { onBuy: (id: UpgradeId) => void };
 export function UpgradeBar({ onBuy }: UpgradeBarProps) {
   const insets = useSafeAreaInsets();
   const levels = useBattleStore((s) => s.upgradeLevels);
-  const charge = useBattleStore((s) => s.charge);
   const loadout = useBattleStore((s) => s.loadout);
+  // Deliberately not subscribed to `charge`: it changes on nearly every ~10Hz
+  // publish, and nothing here shows it. Each `UpgradeRow` subscribes to its
+  // own affordability boolean instead — see the note there.
+  //
   // A stat gated behind an unbought Coilworks unlock (Crit chance, Armor)
   // has no row here at all — buying it in Coilworks is what makes it show
   // up, same rule as the "заблокированные скиллы" the Coilworks screen
   // itself already hides behind an UNLOCK panel.
-  const visibleOrder = UPGRADE_ORDER.filter((id) => loadout.runUpgradesUnlocked[id]);
+  const visibleOrder = useMemo(
+    () => UPGRADE_ORDER.filter((id) => loadout.runUpgradesUnlocked[id]),
+    [loadout],
+  );
 
   return (
     <ScrollView
@@ -41,7 +48,6 @@ export function UpgradeBar({ onBuy }: UpgradeBarProps) {
             def={def}
             level={level}
             cost={cost}
-            affordable={cost != null && charge >= cost}
             loadout={loadout}
             onBuy={onBuy}
           />

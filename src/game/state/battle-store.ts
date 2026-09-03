@@ -73,10 +73,11 @@ export const useBattleStore = create<BattleStore>((set) => ({
     // Bosses can outlive their own wave now that waves run on a clock, so the
     // bar must follow the newest one (highest id) rather than a straggler
     // still walking in from ten waves ago.
-    const boss = world.enemies.reduce<(typeof world.enemies)[number] | undefined>(
-      (newest, e) => (e.isBoss && (newest == null || e.id > newest.id) ? e : newest),
-      undefined,
-    );
+    let boss: (typeof world.enemies)[number] | undefined;
+    for (let i = 0; i < world.enemies.length; i++) {
+      const enemy = world.enemies[i];
+      if (enemy.isBoss && (boss == null || enemy.id > boss.id)) boss = enemy;
+    }
     const bossHpFraction = boss ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : world.bossPending ? 1 : 0;
 
     set({

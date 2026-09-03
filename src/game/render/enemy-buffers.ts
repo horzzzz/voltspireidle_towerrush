@@ -1,5 +1,6 @@
 import { BOSS_VARIANT_COUNT } from '../data/enemies';
 import type { EnemyKind, WorldState } from '../core/types';
+import { BSec, secOffset } from '../vfx/frame-buffer';
 
 /**
  * Fixed capacity per kind's Skia `<Atlas>`. Fixed on purpose: `useRSXformBuffer`
@@ -26,27 +27,16 @@ export const HIT_FLASH_OFFSET = 5;
  */
 const WARP_SECONDS = 0.26;
 
-/** Render buffer keys: one per regular enemy kind, plus one per boss sprite variant. */
-export type EnemyBufferKey = EnemyKind | `boss${number}`;
-
-export type EnemyBufferSet = Record<EnemyBufferKey, Float32Array>;
-
-const BOSS_KEYS = Array.from({ length: BOSS_VARIANT_COUNT }, (_, i) => `boss${i}` as const);
-
 /**
- * One buffer per kind, all zeroed. Used both for the throwaway seed passed to
- * `useSharedValue` and, every frame after that, freshly by `packEnemyBuffers`
- * itself — see that function's own note on why a fresh set is non-negotiable.
+ * Frame-buffer section index per enemy kind / boss variant, in the order
+ * `BSec` declares them. Both the counting and the packing pass index by this.
  */
-export function createEmptyEnemyBuffers(): EnemyBufferSet {
-  const buffers = {
-    scavenger: new Float32Array(MAX_PER_KIND * FIELDS_PER_SLOT),
-    hulk: new Float32Array(MAX_PER_KIND * FIELDS_PER_SLOT),
-    runner: new Float32Array(MAX_PER_KIND * FIELDS_PER_SLOT),
-  } as EnemyBufferSet;
-  for (const key of BOSS_KEYS) buffers[key] = new Float32Array(MAX_BOSS * FIELDS_PER_SLOT);
-  return buffers;
-}
+export const ENEMY_SECTIONS: Record<EnemyKind, number> = {
+  scavenger: BSec.scavenger,
+  hulk: BSec.hulk,
+  runner: BSec.runner,
+};
+export const BOSS_SECTIONS: number[] = [BSec.boss0, BSec.boss1, BSec.boss2].slice(0, BOSS_VARIANT_COUNT);
 
 /** Overshooting ease so a warp-in lands with a little snap. */
 function warpScale(age: number): number {
@@ -57,52 +47,79 @@ function warpScale(age: number): number {
 }
 
 /**
- * Packs live enemy positions into a fresh set of per-kind arrays.
- * `renderScale[kind]` and `bossRenderScale[variant]` are "design px of
- * on-screen diameter, at scale 1, per source pixel" — precomputed in
+ * Section index this enemy renders into, or -1 if its boss variant has no
+ * sprite. Shared by the counting and the packing pass so the two can never
+ * disagree about where an enemy belongs.
+ */
+function sectionFor(enemy: WorldState['enemies'][number]): number {
+  return enemy.isBoss ? (BOSS_SECTIONS[enemy.bossVariant] ?? -1) : ENEMY_SECTIONS[enemy.kind];
+}
+
+/**
+ * First pass: how many enemies each section will hold, written into `counts`
+ * (indexed by section). The frame buffer can't be allocated until this is
+ * known — see vfx/frame-buffer.ts.
+ *
+ * The render-only caps still apply here: past them the sim keeps simulating
+ * an enemy that simply isn't drawn.
+ */
+export function countEnemySections(world: WorldState, counts: Int32Array): void {
+  const enemies = world.enemies;
+  // Indexed, not `for...of` — this runs twice a frame over the whole field,
+  // and Hermes allocates an iterator result per step. Same reason as the sim's
+  // own loops (core/systems/combat.ts).
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
+    const section = sectionFor(enemy);
+    if (section < 0) continue;
+    const cap = enemy.isBoss ? MAX_BOSS : MAX_PER_KIND;
+    if (counts[section] >= cap) continue;
+    counts[section]++;
+  }
+}
+
+/**
+ * Second pass: writes live enemy positions into the frame buffer's per-kind
+ * sections. `renderScale[kind]` and `bossRenderScale[variant]` are "design px
+ * of on-screen diameter, at scale 1, per source pixel" — precomputed in
  * enemy-atlas.tsx from each sprite's real PNG dimensions — so this stays free
  * of any asset-pixel knowledge.
  *
- * A boss is routed to its `boss${bossVariant}` buffer by its wave-cycled
- * sprite variant, never to its `kind` buffer.
+ * A boss is routed to its `boss${bossVariant}` section by its wave-cycled
+ * sprite variant, never to its `kind` section.
  *
- * A brand-new `Float32Array` set every call, on purpose, not reused/mutated
- * in place: Reanimated's cross-thread propagation for a shared value keys off
- * the array's own object identity, so handing back the *same* reference with
- * new numbers in it never reaches the UI thread's copy — the Atlas nodes
- * reading it would just freeze at whatever they last saw. This is cheap
- * enough (tens of KB/frame) to not trouble Hermes' GC.
+ * Must be called with a buffer whose header came from the same frame's
+ * `countEnemySections`, or a section will overrun into the next one.
  */
-export function packEnemyBuffers(
+export function packEnemiesInto(
+  out: Float32Array,
   world: WorldState,
   renderScale: Record<EnemyKind, number>,
   bossRenderScale: number[],
-): EnemyBufferSet {
-  const target = createEmptyEnemyBuffers();
-  const cursors: Record<string, number> = { scavenger: 0, hulk: 0, runner: 0 };
-  for (const key of BOSS_KEYS) cursors[key] = 0;
+  cursors: Int32Array,
+): void {
+  cursors.fill(0);
 
-  for (const enemy of world.enemies) {
-    const isBoss = enemy.isBoss;
-    const key: EnemyBufferKey = isBoss ? (`boss${enemy.bossVariant}` as const) : enemy.kind;
-    const cap = isBoss ? MAX_BOSS : MAX_PER_KIND;
-    const cursor = cursors[key];
+  const enemies = world.enemies;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
+    const section = sectionFor(enemy);
+    if (section < 0) continue;
+    const cap = enemy.isBoss ? MAX_BOSS : MAX_PER_KIND;
+    const cursor = cursors[section];
     if (cursor >= cap) continue; // render-only cap; sim keeps simulating the rest
 
-    const baseScale = isBoss
+    const baseScale = enemy.isBoss
       ? enemy.scale * (bossRenderScale[enemy.bossVariant] ?? 0)
       : enemy.scale * renderScale[enemy.kind];
 
-    const buffer = target[key];
-    const base = cursor * FIELDS_PER_SLOT;
-    buffer[base] = enemy.x;
-    buffer[base + 1] = enemy.y;
-    buffer[base + 2] = baseScale * warpScale(enemy.age);
-    buffer[base + 3] = enemy.dirX;
-    buffer[base + 4] = enemy.dirY;
-    buffer[base + HIT_FLASH_OFFSET] = enemy.hitFlash;
-    cursors[key] = cursor + 1;
+    const base = secOffset(out, section) + cursor * FIELDS_PER_SLOT;
+    out[base] = enemy.x;
+    out[base + 1] = enemy.y;
+    out[base + 2] = baseScale * warpScale(enemy.age);
+    out[base + 3] = enemy.dirX;
+    out[base + 4] = enemy.dirY;
+    out[base + HIT_FLASH_OFFSET] = enemy.hitFlash;
+    cursors[section] = cursor + 1;
   }
-
-  return target;
 }

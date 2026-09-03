@@ -12,21 +12,11 @@ import { memo, useMemo } from 'react';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 
 import { ARENA_HEIGHT, ARENA_WIDTH, TOWER_X, TOWER_Y } from '@/game/data/arena';
-import {
-  BEAM_CAP,
-  BR,
-  G,
-  KIND_TOWER,
-  NR,
-  NUMBER_CAP,
-  RING_CAP,
-  RR,
-  VFX,
-} from '@/game/vfx/layout';
+import { BSec, secCount, secOffset } from '@/game/vfx/frame-buffer';
+import { BR, G, KIND_TOWER, NR, RR } from '@/game/vfx/layout';
 import { VfxColors } from '@/game/vfx/palette';
 import { RING_RADIUS } from '../tower-health-ring';
 import { useVignetteTexture, VIGNETTE_TEX_SIZE } from './overlay-texture';
-import { useWaveBannerTexture } from './wave-banner-texture';
 
 const FONT = require('@expo-google-fonts/grenze/600SemiBold/Grenze_600SemiBold.ttf');
 /** Base size of a normal damage number; the buffer's `scale` grows it from here. */
@@ -36,8 +26,16 @@ const BOUNDS = { width: ARENA_WIDTH, height: ARENA_HEIGHT };
 const BEAM_SEGMENTS = 6;
 /** Where the wave banner sits — clear of both the tower and the top HUD. */
 const BANNER_Y = 300;
-/** On-screen size of the baked banner texture at bannerScale 1. */
+/** On-screen size of the banner at bannerScale 1. */
 const BANNER_DRAW_SCALE = 0.9;
+/** Point size the banner's glyphs are rasterised at. */
+const BANNER_FONT_SIZE = 46;
+/** Outline thickness, in banner-font units. */
+const BANNER_STROKE_WIDTH = 7;
+/** Baseline offset from the banner's vertical centre, in banner-font units. */
+const BANNER_BASELINE = BANNER_FONT_SIZE * 1.6 * 0.2;
+/** The punch-in scale is snapped to this step, so the glyph cache sees a handful of sizes rather than a continuum. */
+const BANNER_SCALE_STEP = 0.05;
 /** Damage-number scale is snapped to this step before `canvas.scale`, so the
  *  glyph cache sees a handful of discrete sizes instead of a continuum. */
 const NUMBER_SCALE_STEP = 0.05;
@@ -71,8 +69,8 @@ const NUMBER_COLORS = [
 ];
 
 type Props = {
-  /** Globals + numbers + beams + rings, packed at the VFX offsets (layout.ts). */
-  vfx: SharedValue<Float32Array>;
+  /** The scene's frame buffer — this node reads its globals, number, beam and ring sections. */
+  frame: SharedValue<Float32Array>;
 };
 
 /**
@@ -86,11 +84,11 @@ type Props = {
  * there — this pool never exceeds ~70 primitives, so one recorded picture is
  * cheaper than the equivalent tree of declarative nodes and their mappers.
  */
-/** Memoized — same rationale as `EnemyAtlas`/`ParticleLayer`: `vfx` is a stable SharedValue. */
-export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
+/** Memoized — same rationale as `EnemyAtlas`/`ParticleLayer`: `frame` is a stable SharedValue. */
+export const VfxPicture = memo(function VfxPicture({ frame }: Props) {
   const font = useFont(FONT, NUMBER_FONT_SIZE);
+  const bannerFont = useFont(FONT, BANNER_FONT_SIZE);
   const vignette = useVignetteTexture();
-  const banner = useWaveBannerTexture();
 
   // Skia host objects are shared with the UI runtime rather than cloned, so
   // these are created once and mutated in the worklet instead of per frame.
@@ -129,15 +127,93 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
     // of building through `SkPathBuilder` and snapshotting with `.build()`.
     const path = Skia.PathBuilder.Make();
 
-    return { stroke, textFill, textShadow, image, hpRing, flash, path, scratch: Float32Array.of(0, 0, 0, 0) };
+    // Rects whose geometry never changes, built once instead of per frame:
+    // `Skia.XYWHRect` allocates, and these sat in branches that run on most
+    // frames of a run (the HP ring always, the vignette through the whole
+    // back half of one).
+    const hpRingRect = Skia.XYWHRect(
+      TOWER_X - RING_RADIUS,
+      TOWER_Y - RING_RADIUS,
+      RING_RADIUS * 2,
+      RING_RADIUS * 2,
+    );
+    const vignetteSrc = Skia.XYWHRect(0, 0, VIGNETTE_TEX_SIZE.width, VIGNETTE_TEX_SIZE.height);
+    const overlayRect = Skia.XYWHRect(-40, -40, ARENA_WIDTH + 80, ARENA_HEIGHT + 80);
+
+    // The banner's black outline. Its own paint because it is the only
+    // stroked *text* in the picture.
+    const bannerOutline = Skia.Paint();
+    bannerOutline.setAntiAlias(true);
+    bannerOutline.setStyle(PaintStyle.Stroke);
+    bannerOutline.setStrokeWidth(BANNER_STROKE_WIDTH);
+    bannerOutline.setStrokeJoin(StrokeJoin.Round);
+
+    const bannerFill = Skia.Paint();
+    bannerFill.setAntiAlias(true);
+
+    return {
+      stroke,
+      textFill,
+      textShadow,
+      image,
+      hpRing,
+      flash,
+      path,
+      hpRingRect,
+      vignetteSrc,
+      overlayRect,
+      bannerOutline,
+      bannerFill,
+      // Mutable label cache, rebuilt on the UI thread only when the wave (or
+      // its boss-ness) actually changes — not once per frame the banner is up.
+      bannerKey: -1,
+      bannerLabel: '',
+      bannerHalfWidth: 0,
+      scratch: Float32Array.of(0, 0, 0, 0),
+    };
   }, []);
 
+  /**
+   * Per-character advance widths, measured once, indexed by char code.
+   *
+   * `font.measureText()` was being called for every live damage number every
+   * frame — up to 28 shaping passes and 28 throwaway rect objects per frame,
+   * on the UI runtime, purely to centre a label. Damage numbers only ever use
+   * digits, a dot and the K/M/B/T suffixes, none of which kern against each
+   * other in this face, so summing cached advances gives the same width for
+   * one table lookup per character.
+   */
+  const advances = useMemo(() => {
+    const table = new Float32Array(128);
+    if (!font) return table;
+    const glyphs = '0123456789.KMBT';
+    for (let i = 0; i < glyphs.length; i++) {
+      const ch = glyphs[i];
+      table[ch.charCodeAt(0)] = font.measureText(ch).width;
+    }
+    return table;
+  }, [font]);
+
   const picture = useDerivedValue(() => {
-    const data = vfx.value;
-    const g = VFX.globals;
-    const { stroke, textFill, textShadow, image, hpRing, flash: flashPaint, path, scratch } = paints;
+    const data = frame.value;
+    const g = secOffset(data, BSec.globals);
+    const {
+      stroke,
+      textFill,
+      textShadow,
+      image,
+      hpRing,
+      flash: flashPaint,
+      path,
+      hpRingRect,
+      vignetteSrc,
+      overlayRect,
+      bannerOutline,
+      bannerFill,
+      scratch,
+    } = paints;
+    const advanceTable = advances;
     const vignetteTex = vignette.value;
-    const bannerTex = banner.texture.value;
 
     const setColor = (paint: typeof stroke, r: number, gc: number, b: number, a: number) => {
       'worklet';
@@ -150,8 +226,9 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
 
     return createPicture((canvas) => {
       // ---- shockwave rings ------------------------------------------------
-      const ringBase = VFX.rings;
-      for (let i = 0; i < RING_CAP; i++) {
+      const ringBase = secOffset(data, BSec.rings);
+      const ringCount = secCount(data, BSec.rings);
+      for (let i = 0; i < ringCount; i++) {
         const base = ringBase + i * RR.STRIDE;
         const alpha = data[base + RR.a];
         if (alpha <= 0.004) continue;
@@ -171,11 +248,7 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
           hpFraction > 0.5 ? VfxColors.waveScan : hpFraction > 0.25 ? VfxColors.upgrade : VfxColors.hurt;
         setColor(hpRing, hpColor[0], hpColor[1], hpColor[2], 1);
         path.reset();
-        path.addArc(
-          Skia.XYWHRect(TOWER_X - RING_RADIUS, TOWER_Y - RING_RADIUS, RING_RADIUS * 2, RING_RADIUS * 2),
-          -90,
-          360 * hpFraction,
-        );
+        path.addArc(hpRingRect, -90, 360 * hpFraction);
         canvas.drawPath(path.build(), hpRing);
       }
 
@@ -188,8 +261,9 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
       }
 
       // ---- lightning ------------------------------------------------------
-      const beamBase = VFX.beams;
-      for (let i = 0; i < BEAM_CAP; i++) {
+      const beamBase = secOffset(data, BSec.beams);
+      const beamCount = secCount(data, BSec.beams);
+      for (let i = 0; i < beamCount; i++) {
         const base = beamBase + i * BR.STRIDE;
         const alpha = data[base + BR.a];
         if (alpha <= 0.01) continue;
@@ -248,15 +322,22 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
 
       // ---- damage numbers -------------------------------------------------
       if (font !== null) {
-        const numBase = VFX.numbers;
-        for (let i = 0; i < NUMBER_CAP; i++) {
+        const numBase = secOffset(data, BSec.numbers);
+        const numCount = secCount(data, BSec.numbers);
+        for (let i = 0; i < numCount; i++) {
           const base = numBase + i * NR.STRIDE;
           const alpha = data[base + NR.a];
           if (alpha <= 0.01) continue;
 
           const kind = data[base + NR.kind];
           const label = formatAmount(data[base + NR.amount], kind);
-          const width = font.measureText(label).width;
+          let width = 0;
+          for (let c = 0; c < label.length; c++) {
+            // Index guard: an out-of-range read would be `undefined` and turn
+            // the whole width into NaN, which centres the label nowhere.
+            const code = label.charCodeAt(c);
+            if (code < 128) width += advanceTable[code];
+          }
 
           canvas.save();
           canvas.translate(data[base + NR.x], data[base + NR.y]);
@@ -280,19 +361,47 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
       }
 
       // ---- wave / boss banner ----------------------------------------------
+      // Drawn straight here rather than blitted from a baked texture. Baking
+      // meant `VfxPicture` had to subscribe to `battle-store.wave`, so every
+      // wave transition re-rendered this component, re-recorded a stroked-text
+      // picture on the JS thread and built an offscreen GPU surface on the UI
+      // thread — all inside the same few frames the wave's ring, banner and
+      // spawn batch already land in. Profiling put nearly every long frame of
+      // a run right there. This node now has no store subscription at all.
       const bannerAlpha = data[g + G.bannerAlpha];
-      if (bannerTex !== null && bannerAlpha > 0.01) {
-        const bannerScale = data[g + G.bannerScale] * BANNER_DRAW_SCALE;
-        const w = banner.width * bannerScale;
-        const h = banner.height * bannerScale;
-        image.setAlphaf(bannerAlpha);
-        canvas.drawImageRect(
-          bannerTex,
-          Skia.XYWHRect(0, 0, banner.width, banner.height),
-          Skia.XYWHRect(ARENA_WIDTH / 2 - w / 2, BANNER_Y - h / 2, w, h),
-          image,
-        );
-        image.setAlphaf(1);
+      if (bannerFont !== null && bannerAlpha > 0.01) {
+        // Rounded: the value round-trips through a Float32, and a stray
+        // fractional bit would render as "WAVE 5.0000001".
+        const wave = Math.round(data[g + G.bannerWave]);
+        const isBossBanner = data[g + G.bannerBoss] > 0.5;
+        // Key on both, so a boss wave and a plain wave of the same number
+        // never share a cached label.
+        const key = wave * 2 + (isBossBanner ? 1 : 0);
+        if (key !== paints.bannerKey) {
+          paints.bannerKey = key;
+          paints.bannerLabel = isBossBanner ? `BOSS · WAVE ${wave}` : `WAVE ${wave}`;
+          paints.bannerHalfWidth = bannerFont.measureText(paints.bannerLabel).width / 2;
+        }
+        const label = paints.bannerLabel;
+
+        // Snapped, so the punch-in overshoot asks the glyph cache for a few
+        // discrete sizes instead of a different one every frame — the same
+        // trick the damage numbers use above.
+        const raw = data[g + G.bannerScale] * BANNER_DRAW_SCALE;
+        const bannerScale = Math.round(raw / BANNER_SCALE_STEP) * BANNER_SCALE_STEP;
+
+        canvas.save();
+        canvas.translate(ARENA_WIDTH / 2, BANNER_Y);
+        canvas.scale(bannerScale, bannerScale);
+
+        setColor(bannerOutline, 0, 0, 0, bannerAlpha * 0.85);
+        canvas.drawText(label, -paints.bannerHalfWidth, BANNER_BASELINE, bannerOutline, bannerFont);
+
+        const bannerColor = isBossBanner ? VfxColors.boss : VfxColors.waveScan;
+        setColor(bannerFill, bannerColor[0], bannerColor[1], bannerColor[2], bannerAlpha);
+        canvas.drawText(label, -paints.bannerHalfWidth, BANNER_BASELINE, bannerFill, bannerFont);
+
+        canvas.restore();
       }
 
       // ---- screen-wide overlays -------------------------------------------
@@ -307,18 +416,13 @@ export const VfxPicture = memo(function VfxPicture({ vfx }: Props) {
 
         if (vig > 0.01 && vignetteTex !== null) {
           image.setAlphaf(vig * 0.75);
-          canvas.drawImageRect(
-            vignetteTex,
-            Skia.XYWHRect(0, 0, VIGNETTE_TEX_SIZE.width, VIGNETTE_TEX_SIZE.height),
-            Skia.XYWHRect(-40, -40, ARENA_WIDTH + 80, ARENA_HEIGHT + 80),
-            image,
-          );
+          canvas.drawImageRect(vignetteTex, vignetteSrc, overlayRect, image);
           image.setAlphaf(1);
         }
 
         if (flash > 0.01) {
           setColor(flashPaint, 1, 0.95, 0.85, flash * 0.5);
-          canvas.drawRect(Skia.XYWHRect(-40, -40, ARENA_WIDTH + 80, ARENA_HEIGHT + 80), flashPaint);
+          canvas.drawRect(overlayRect, flashPaint);
         }
 
         canvas.restore();

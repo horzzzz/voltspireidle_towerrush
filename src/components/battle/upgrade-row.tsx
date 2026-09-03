@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
 import { formatNumber, formatStatValue } from '@/game/core/numbers';
+import { useBattleStore } from '@/game/state/battle-store';
 import { chipAwareStatValue, type UpgradeDef } from '@/game/data/tower-stats';
 import type { RunLoadout, UpgradeId } from '@/game/core/types';
 
@@ -32,7 +33,6 @@ type UpgradeRowProps = {
   level: number;
   /** Pre-computed by the bar, not the row: see the memoization note below. */
   cost: number | null;
-  affordable: boolean;
   loadout: RunLoadout;
   onBuy: (id: UpgradeId) => void;
 };
@@ -41,16 +41,20 @@ type UpgradeRowProps = {
  * One buyable in-run upgrade (Figma node 1:1549) — icon, current → next stat,
  * Charge cost.
  *
- * Memoized, and deliberately taking `cost`/`affordable` rather than the raw
- * `charge` total: `battle-store` publishes at ~10Hz while Charge is
- * continuously ticking up, so a prop of the raw number would change (and
- * re-render every row) on nearly every publish. `affordable` only flips when
- * this particular row's own threshold is actually crossed, and `onBuy` is
- * the engine's own stable callback (see use-battle-engine's `actions`) taking
- * `id` rather than a fresh per-row closure — so an unrelated row buying
- * something no longer re-renders this one at all.
+ * Affordability is subscribed to *here*, as a boolean, rather than passed down
+ * from the bar: `battle-store` publishes at ~10Hz while Charge ticks up
+ * continuously, so anything reading the raw number re-renders on nearly every
+ * publish. Selecting `charge >= cost` means zustand only re-renders this row
+ * when its own threshold is actually crossed — and it keeps the bar itself off
+ * the `charge` subscription entirely, so the six-row list stops being rebuilt
+ * ten times a second for a number none of it displays.
+ *
+ * Memoized on top of that, with `onBuy` the engine's own stable callback (see
+ * use-battle-engine's `actions`) taking `id` rather than a fresh per-row
+ * closure — so an unrelated row buying something never re-renders this one.
  */
-export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, affordable, loadout, onBuy }: UpgradeRowProps) {
+export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, loadout, onBuy }: UpgradeRowProps) {
+  const affordable = useBattleStore((s) => cost != null && s.charge >= cost);
   const maxed = cost == null;
 
   return (

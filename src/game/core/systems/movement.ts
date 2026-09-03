@@ -12,7 +12,11 @@ import type { WorldState } from '../types';
  * source (facing-down) orientation.
  */
 export function updateMovement(world: WorldState, dt: number): void {
-  for (const enemy of world.enemies) {
+  // Indexed loop — see `findNearestTarget` in combat.ts on why `for...of` is
+  // not free on Hermes in a per-tick path.
+  const enemies = world.enemies;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
     const dx = TOWER_X - enemy.x;
     const dy = TOWER_Y - enemy.y;
     const dist = Math.hypot(dx, dy);

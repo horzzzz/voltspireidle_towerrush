@@ -4,8 +4,9 @@ import type { Rgb } from './palette';
 
 /**
  * A fixed-capacity particle pool: simulation state in one flat `Float32Array`,
- * packed each frame into a second one laid out the way the Skia `<Atlas>`
- * worklets read it (see layout.ts).
+ * advanced by `integrate` and then packed — live entries only, contiguously —
+ * into a slice of the caller's frame buffer by `pack`, laid out the way the
+ * Skia `<Atlas>` worklets read it (see layout.ts and frame-buffer.ts).
  *
  * Shared by the battle scene (vfx/system.ts) and the menus' reward bursts
  * (components/fx/reward-overlay.tsx) — same pool, same brushes, same single
@@ -20,21 +21,6 @@ import type { Rgb } from './palette';
 export class ParticlePool {
   readonly capacity: number;
   private readonly data: Float32Array;
-  /**
-   * Reallocated fresh every `update()`, deliberately — see `use-battle-engine`'s
-   * own note on this. Reusing a fixed pair of output buffers and mutating them
-   * in place (the obvious "zero allocation" move) silently breaks Reanimated's
-   * cross-thread propagation on this project's setup: its JS↔UI shareable
-   * cache keys off the *array's object identity*, not its contents, so handing
-   * the same reference back with new numbers in it never reaches the UI
-   * thread's copy — the Atlas/Picture nodes reading this buffer just freeze at
-   * whatever they last saw. A fresh `Float32Array` per frame is what makes a
-   * plain `sharedValue.value = buffer` assignment actually propagate every
-   * time. Cheap enough at this size (tens of KB/frame) not to trouble Hermes'
-   * GC — this exact trade was already made, and documented, for enemy
-   * positions before any of this VFX work existed.
-   */
-  private out: Float32Array;
   private cursor = 0;
   private aliveCount = 0;
   private readonly rng: Rng;
@@ -43,22 +29,19 @@ export class ParticlePool {
     this.capacity = capacity;
     this.rng = rng;
     this.data = new Float32Array(capacity * P.STRIDE);
-    this.out = new Float32Array(capacity * PR.STRIDE);
   }
 
-  /** Live particles as of the last `update`. Drives the automatic detail scaling. */
+  /**
+   * Live particles as of the last `integrate`. Drives the automatic detail
+   * scaling, and tells the frame builder how much room this pool needs — see
+   * vfx/frame-buffer.ts on why sections are sized to live entries.
+   */
   get alive(): number {
     return this.aliveCount;
   }
 
-  /** The buffer packed by the last `update` — a fresh reference every call. */
-  get buffer(): Float32Array {
-    return this.out;
-  }
-
   reset(): void {
     this.data.fill(0);
-    this.out.fill(0);
     this.aliveCount = 0;
   }
 
@@ -111,8 +94,8 @@ export class ParticlePool {
     d[base + P.homing] = homing;
   }
 
-  /** Integrates every live particle and repacks the render buffer. */
-  update(dt: number): void {
+  /** Advances every live particle. Packing is a separate, later step — the frame buffer can't be sized until every pool knows how many entries it has. */
+  integrate(dt: number): void {
     const d = this.data;
     let alive = 0;
 
@@ -154,17 +137,27 @@ export class ParticlePool {
     }
 
     this.aliveCount = alive;
-    this.out = new Float32Array(this.capacity * PR.STRIDE);
-    this.pack(this.out);
   }
 
-  private pack(out: Float32Array): void {
+  /**
+   * Writes the live particles contiguously from `offset`, and returns how many
+   * were written. Dead slots are skipped rather than emitted as zero-size
+   * quads, so a pool with 12 live particles costs 12 entries instead of 320 —
+   * that compaction is the whole point (see vfx/frame-buffer.ts).
+   *
+   * `limit` is the section's reserved capacity, taken from the frame header:
+   * packing stops there rather than trusting `alive` to still match, so a
+   * count that drifted can never overrun into the next section.
+   */
+  pack(out: Float32Array, offset: number, limit: number): number {
     const d = this.data;
-    for (let i = 0; i < this.capacity; i++) {
+    let written = 0;
+    for (let i = 0; i < this.capacity && written < limit; i++) {
       const base = i * P.STRIDE;
-      const outBase = i * PR.STRIDE;
       const life = d[base + P.life];
-      if (life <= 0) continue; // fresh array is already zeroed
+      if (life <= 0) continue;
+      const outBase = offset + written * PR.STRIDE;
+      written++;
       // 0 at birth, 1 at death.
       const t = 1 - life * d[base + P.invMaxLife];
       // Quick attack so nothing pops in at full brightness, long ease-out tail.
@@ -180,40 +173,33 @@ export class ParticlePool {
       out[outBase + PR.a] = d[base + P.alpha] * fade;
       out[outBase + PR.brush] = d[base + P.brush];
     }
+    return written;
   }
 }
 
 /**
  * Expanding (or imploding) stroked rings — shockwaves, warp-ins, level-up
- * pulses. Same fixed-capacity, round-robin, double-buffered contract as
+ * pulses. Same fixed-capacity, round-robin, integrate-then-pack contract as
  * `ParticlePool`; drawn by the `<Picture>` layer rather than the atlas,
  * because a ring is one stroked circle and there are never many at once.
  */
 export class RingPool {
   readonly capacity: number;
   private readonly data: Float32Array;
-  /** Fresh every `update()` — see `ParticlePool`'s own note on why. */
-  private out: Float32Array;
   private cursor = 0;
   private aliveCount = 0;
 
   constructor(capacity: number) {
     this.capacity = capacity;
     this.data = new Float32Array(capacity * R.STRIDE);
-    this.out = new Float32Array(capacity * RR.STRIDE);
   }
 
   get alive(): number {
     return this.aliveCount;
   }
 
-  get buffer(): Float32Array {
-    return this.out;
-  }
-
   reset(): void {
     this.data.fill(0);
-    this.out.fill(0);
     this.aliveCount = 0;
   }
 
@@ -246,7 +232,8 @@ export class RingPool {
     d[base + R.alpha] = alpha;
   }
 
-  update(dt: number): void {
+  /** Ages every live ring. Packing happens later — see `ParticlePool.integrate`. */
+  integrate(dt: number): void {
     const d = this.data;
     let alive = 0;
     for (let i = 0; i < this.capacity; i++) {
@@ -258,17 +245,18 @@ export class RingPool {
       if (left > 0) alive++;
     }
     this.aliveCount = alive;
-    this.out = new Float32Array(this.capacity * RR.STRIDE);
-    this.pack(this.out);
   }
 
-  private pack(out: Float32Array): void {
+  /** Writes the live rings contiguously from `offset`, capped at the section's reserved `limit`; returns how many. */
+  pack(out: Float32Array, offset: number, limit: number): number {
     const d = this.data;
-    for (let i = 0; i < this.capacity; i++) {
+    let written = 0;
+    for (let i = 0; i < this.capacity && written < limit; i++) {
       const base = i * R.STRIDE;
-      const outBase = i * RR.STRIDE;
       const life = d[base + R.life];
-      if (life <= 0) continue; // fresh array is already zeroed
+      if (life <= 0) continue;
+      const outBase = offset + written * RR.STRIDE;
+      written++;
       const t = 1 - life * d[base + R.invMaxLife];
       // Ease-out expansion: fast at the front, coasting at the end.
       const eased = 1 - (1 - t) ** 2.2;
@@ -281,5 +269,6 @@ export class RingPool {
       out[outBase + RR.b] = d[base + R.blue];
       out[outBase + RR.a] = d[base + R.alpha] * (1 - t) ** 1.6;
     }
+    return written;
   }
 }

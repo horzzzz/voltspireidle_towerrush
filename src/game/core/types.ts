@@ -69,46 +69,122 @@ export interface SpawnEntry {
   dropsGem?: boolean;
 }
 
+/** What kind of thing just happened. See `VfxEvent` for which fields each one uses. */
+export type VfxEventType =
+  | 'bolt'
+  | 'hit'
+  | 'damage'
+  | 'kill'
+  | 'spawn'
+  | 'towerHit'
+  | 'waveStart'
+  | 'upgrade';
+
 /**
  * One thing that just happened and is worth showing. The sim emits these and
  * knows nothing about how (or whether) they get drawn — the render layer's
  * VFX system (src/game/vfx) drains the queue every frame and turns each one
  * into particles, beams, numbers and rings.
  *
- * Deliberately plain data with no ids and no timestamps: an event is consumed
- * exactly once, the moment it is drained, so nothing here needs to survive or
- * be matched up across frames.
+ * One flat mutable record rather than a discriminated union of object
+ * literals, because these are **pooled**: the queue keeps its records forever
+ * and `emitVfx` hands back a reset one to fill in. A busy frame emits three
+ * events per shot plus one per enemy in contact, and at x3 that was thousands
+ * of short-lived objects a second on the JS heap — the same pressure that
+ * made the buffers worth compacting (see vfx/frame-buffer.ts).
+ *
+ * The cost of pooling is that the type no longer says which fields a given
+ * `type` uses. Which fields each one means:
+ *
+ * - `bolt`      — (x, y) tower, (x2, y2) impact point clamped to the attack ring, isCrit
+ * - `hit`       — (x, y), (dirX, dirY) unit vector the bolt arrived along, radius, isCrit, isBoss
+ * - `damage`    — (x, y), amount, isCrit, isBoss
+ * - `kill`      — (x, y), radius, kind, isBoss, bossVariant, dropsGem
+ * - `spawn`     — (x, y), radius, isBoss
+ * - `towerHit`  — (x, y) the attacker, (dirX, dirY) toward the tower, amount
+ * - `waveStart` — wave, isBoss
+ * - `upgrade`   — nothing
  */
-export type VfxEvent =
-  /** Tower shot a target. Endpoint is already clamped to the attack ring. */
-  | { type: 'bolt'; x1: number; y1: number; x2: number; y2: number; isCrit: boolean }
-  /** A shot connected: `dirX/dirY` is the unit vector the bolt arrived along. */
-  | { type: 'hit'; x: number; y: number; dirX: number; dirY: number; radius: number; isCrit: boolean; isBoss: boolean }
-  /** Floating damage number. */
-  | { type: 'damage'; x: number; y: number; amount: number; isCrit: boolean; isBoss: boolean }
-  /** An enemy died. `kind` picks the debris palette. */
-  | { type: 'kill'; x: number; y: number; radius: number; kind: EnemyKind; isBoss: boolean; bossVariant: number; dropsGem: boolean }
-  /** An enemy walked into view — drives the warp-in ring. */
-  | { type: 'spawn'; x: number; y: number; radius: number; isBoss: boolean }
-  /** The tower took a contact hit from an enemy standing at `x, y`. */
-  | { type: 'towerHit'; x: number; y: number; dirX: number; dirY: number; amount: number }
-  /** A new wave's clock started. */
-  | { type: 'waveStart'; wave: number; isBoss: boolean }
-  /** An in-run upgrade was bought. */
-  | { type: 'upgrade' };
+export interface VfxEvent {
+  type: VfxEventType;
+  x: number;
+  y: number;
+  /** `bolt` only: where the bolt ends. */
+  x2: number;
+  y2: number;
+  dirX: number;
+  dirY: number;
+  radius: number;
+  amount: number;
+  kind: EnemyKind;
+  isCrit: boolean;
+  isBoss: boolean;
+  bossVariant: number;
+  dropsGem: boolean;
+  wave: number;
+}
+
+function createVfxEvent(): VfxEvent {
+  return {
+    type: 'upgrade',
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 0,
+    dirX: 0,
+    dirY: 0,
+    radius: 0,
+    amount: 0,
+    kind: 'scavenger',
+    isCrit: false,
+    isBoss: false,
+    bossVariant: 0,
+    dropsGem: false,
+    wave: 0,
+  };
+}
 
 /**
  * Hard ceiling on the un-drained queue. In the app `use-battle-engine` drains
  * it every frame so it never comes close; headless (scripts/battle-sim.ts)
- * nothing drains it at all, and this is what keeps a 10-minute simulated run
- * from accumulating hundreds of thousands of dead event objects.
+ * nothing drains it at all, and this is what stops a 10-minute simulated run
+ * from growing the pool without bound.
  */
 export const MAX_VFX_QUEUE = 512;
 
-/** Queues a VFX event, silently dropping it once the queue is saturated. */
-export function emitVfx(world: WorldState, event: VfxEvent): void {
-  if (world.vfx.length >= MAX_VFX_QUEUE) return;
-  world.vfx.push(event);
+/**
+ * Claims the next queue slot and returns it, fully reset, for the caller to
+ * fill in. Returns `null` once the queue is saturated — the event is simply
+ * dropped, exactly as before.
+ *
+ * Records are reused across frames: `world.vfxCount` is what gets rewound
+ * after a drain, never the array itself.
+ */
+export function emitVfx(world: WorldState, type: VfxEventType): VfxEvent | null {
+  if (world.vfxCount >= MAX_VFX_QUEUE) return null;
+  let event = world.vfx[world.vfxCount];
+  if (event === undefined) {
+    event = createVfxEvent();
+    world.vfx.push(event);
+  }
+  world.vfxCount++;
+
+  event.type = type;
+  event.x = 0;
+  event.y = 0;
+  event.x2 = 0;
+  event.y2 = 0;
+  event.dirX = 0;
+  event.dirY = 0;
+  event.radius = 0;
+  event.amount = 0;
+  event.kind = 'scavenger';
+  event.isCrit = false;
+  event.isBoss = false;
+  event.bossVariant = 0;
+  event.dropsGem = false;
+  event.wave = 0;
+  return event;
 }
 
 /**
@@ -339,8 +415,13 @@ export interface WorldState {
   upgradesBought: number;
 
   nextEnemyId: number;
-  /** Drained every frame by the render layer — see VfxEvent / emitVfx. */
+  /**
+   * Pooled event records — see VfxEvent / emitVfx. Only the first `vfxCount`
+   * are live; the array itself is never trimmed, so the records get reused
+   * instead of reallocated every frame.
+   */
   vfx: VfxEvent[];
+  vfxCount: number;
 
   result: RunSummary | null;
 }

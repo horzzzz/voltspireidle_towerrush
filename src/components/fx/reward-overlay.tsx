@@ -14,7 +14,8 @@ import { StyleSheet, View } from 'react-native';
 import { useDerivedValue, useSharedValue, type SharedValue } from 'react-native-reanimated';
 
 import { useFxStore } from '@/game/state/fx-store';
-import { RAY_COUNT, RR, UG, UI_ADDITIVE_CAP, UI_NORMAL_CAP, UI_RING_CAP } from '@/game/vfx/layout';
+import { secCount, secOffset, USec } from '@/game/vfx/frame-buffer';
+import { RAY_COUNT, RR, UG, UI_ADDITIVE_CAP, UI_NORMAL_CAP } from '@/game/vfx/layout';
 import { RewardFxSystem } from '@/game/vfx/reward-system';
 import { ParticleLayer } from '@/game/render/vfx/particle-layer';
 
@@ -28,7 +29,7 @@ const IDLE_FRAMES_BEFORE_SLEEP = 12;
  * paths rather than particles. Same one-recorded-picture approach the battle
  * scene uses (render/vfx/vfx-picture.tsx).
  */
-function RewardPicture({ rings, globals }: { rings: SharedValue<Float32Array>; globals: SharedValue<Float32Array> }) {
+function RewardPicture({ frame }: { frame: SharedValue<Float32Array> }) {
   const paints = useMemo(() => {
     const stroke = Skia.Paint();
     stroke.setAntiAlias(true);
@@ -44,8 +45,8 @@ function RewardPicture({ rings, globals }: { rings: SharedValue<Float32Array>; g
   }, []);
 
   const picture = useDerivedValue(() => {
-    const ringData = rings.value;
-    const g = globals.value;
+    const data = frame.value;
+    const gBase = secOffset(data, USec.globals);
     const { stroke, fill, scratch } = paints;
 
     const setColor = (paint: typeof stroke, r: number, gc: number, b: number, a: number) => {
@@ -59,14 +60,14 @@ function RewardPicture({ rings, globals }: { rings: SharedValue<Float32Array>; g
 
     return createPicture((canvas) => {
       // ---- rotating light rays (a big win) --------------------------------
-      const raysAlpha = g[UG.raysAlpha];
+      const raysAlpha = data[gBase + UG.raysAlpha];
       if (raysAlpha > 0.005) {
-        const x = g[UG.raysX];
-        const y = g[UG.raysY];
-        const radius = g[UG.raysRadius];
+        const x = data[gBase + UG.raysX];
+        const y = data[gBase + UG.raysY];
+        const radius = data[gBase + UG.raysRadius];
         const step = (Math.PI * 2) / RAY_COUNT;
         const half = step * 0.22;
-        const rotation = g[UG.raysRotation];
+        const rotation = data[gBase + UG.raysRotation];
 
         const path = Skia.Path.Make();
         for (let i = 0; i < RAY_COUNT; i++) {
@@ -82,8 +83,8 @@ function RewardPicture({ rings, globals }: { rings: SharedValue<Float32Array>; g
             { x, y },
             radius,
             [
-              Float32Array.of(g[UG.raysR], g[UG.raysG], g[UG.raysB], raysAlpha),
-              Float32Array.of(g[UG.raysR], g[UG.raysG], g[UG.raysB], 0),
+              Float32Array.of(data[gBase + UG.raysR], data[gBase + UG.raysG], data[gBase + UG.raysB], raysAlpha),
+              Float32Array.of(data[gBase + UG.raysR], data[gBase + UG.raysG], data[gBase + UG.raysB], 0),
             ],
             [0.05, 1],
             TileMode.Clamp,
@@ -94,19 +95,21 @@ function RewardPicture({ rings, globals }: { rings: SharedValue<Float32Array>; g
       }
 
       // ---- rings -----------------------------------------------------------
-      for (let i = 0; i < UI_RING_CAP; i++) {
-        const base = i * RR.STRIDE;
-        const alpha = ringData[base + RR.a];
+      const ringBase = secOffset(data, USec.rings);
+      const ringCount = secCount(data, USec.rings);
+      for (let i = 0; i < ringCount; i++) {
+        const base = ringBase + i * RR.STRIDE;
+        const alpha = data[base + RR.a];
         if (alpha <= 0.004) continue;
-        setColor(stroke, ringData[base + RR.r], ringData[base + RR.g], ringData[base + RR.b], alpha);
-        stroke.setStrokeWidth(ringData[base + RR.width]);
-        canvas.drawCircle(ringData[base + RR.x], ringData[base + RR.y], ringData[base + RR.radius], stroke);
+        setColor(stroke, data[base + RR.r], data[base + RR.g], data[base + RR.b], alpha);
+        stroke.setStrokeWidth(data[base + RR.width]);
+        canvas.drawCircle(data[base + RR.x], data[base + RR.y], data[base + RR.radius], stroke);
       }
 
       // ---- win flash -------------------------------------------------------
-      const flash = g[UG.flash];
+      const flash = data[gBase + UG.flash];
       if (flash > 0.01) {
-        setColor(fill, g[UG.flashR], g[UG.flashG], g[UG.flashB], flash * 0.3);
+        setColor(fill, data[gBase + UG.flashR], data[gBase + UG.flashG], data[gBase + UG.flashB], flash * 0.3);
         canvas.drawRect(Skia.XYWHRect(-OVERSCAN, -OVERSCAN, OVERSCAN * 2, OVERSCAN * 2), fill);
       }
     });
@@ -133,10 +136,7 @@ export function RewardOverlay() {
   const [origin, setOrigin] = useState({ x: 0, y: 0 });
   const system = useMemo(() => new RewardFxSystem(), []);
 
-  const additive = useSharedValue(system.additiveBuffer);
-  const normal = useSharedValue(system.normalBuffer);
-  const rings = useSharedValue(system.ringsBuffer);
-  const globals = useSharedValue(system.globalsBuffer);
+  const frameBuffer = useSharedValue(system.buffer);
 
   const onLayout = useCallback(() => {
     viewRef.current?.measureInWindow((x, y) => {
@@ -157,10 +157,7 @@ export function RewardOverlay() {
       for (const request of queued) system.burst(request);
       system.update(dt);
 
-      additive.value = system.additiveBuffer;
-      normal.value = system.normalBuffer;
-      rings.value = system.ringsBuffer;
-      globals.value = system.globalsBuffer;
+      frameBuffer.value = system.buffer;
 
       idle = system.busy || queued.length > 0 ? 0 : idle + 1;
       if (idle > IDLE_FRAMES_BEFORE_SLEEP) {
@@ -187,7 +184,7 @@ export function RewardOverlay() {
       unsubscribe();
       if (raf != null) cancelAnimationFrame(raf);
     };
-  }, [system, additive, normal, rings, globals]);
+  }, [system, frameBuffer]);
 
   const transform = useMemo(() => [{ translateX: -origin.x }, { translateY: -origin.y }], [origin]);
 
@@ -195,9 +192,9 @@ export function RewardOverlay() {
     <View ref={viewRef} onLayout={onLayout} pointerEvents="none" style={StyleSheet.absoluteFill}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Group transform={transform}>
-          <ParticleLayer buffer={normal} capacity={UI_NORMAL_CAP} />
-          <ParticleLayer buffer={additive} capacity={UI_ADDITIVE_CAP} additive />
-          <RewardPicture rings={rings} globals={globals} />
+          <ParticleLayer frame={frameBuffer} section={USec.normal} capacity={UI_NORMAL_CAP} />
+          <ParticleLayer frame={frameBuffer} section={USec.additive} capacity={UI_ADDITIVE_CAP} additive />
+          <RewardPicture frame={frameBuffer} />
         </Group>
       </Canvas>
     </View>

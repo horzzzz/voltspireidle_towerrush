@@ -4,7 +4,8 @@ import type { SharedValue } from 'react-native-reanimated';
 
 import { ENEMY_BASE_RADIUS } from '@/game/data/arena';
 import type { EnemyKind } from '@/game/core/types';
-import { FIELDS_PER_SLOT, HIT_FLASH_OFFSET, MAX_BOSS, MAX_PER_KIND } from './enemy-buffers';
+import { secCount, secOffset } from '@/game/vfx/frame-buffer';
+import { BOSS_SECTIONS, ENEMY_SECTIONS, FIELDS_PER_SLOT, HIT_FLASH_OFFSET, MAX_BOSS, MAX_PER_KIND } from './enemy-buffers';
 
 /** On-screen diameter, in design px, for a kind-1.0-scale enemy. */
 const BASE_DIAMETER = ENEMY_BASE_RADIUS * 2;
@@ -52,8 +53,8 @@ type Props = {
   kind?: EnemyKind;
   /** When set, draw the dedicated boss sprite for this variant instead. */
   bossVariant?: number;
-  /** Packed [x, y, finalScale, dirX, dirY, hitFlash] × capacity, refreshed every frame. */
-  buffer: SharedValue<Float32Array>;
+  /** The scene's whole frame buffer; this node reads only its own section. */
+  frame: SharedValue<Float32Array>;
 };
 
 /**
@@ -62,7 +63,7 @@ type Props = {
  * just a different source + a larger `finalScale`, not a separate draw path.
  */
 /**
- * Memoized: its `buffer` prop is a stable SharedValue for the whole battle's
+ * Memoized: its `frame` prop is a stable SharedValue for the whole battle's
  * lifetime (see use-battle-engine.ts), so without this the component — and
  * every `useRSXformBuffer`/`useColorBuffer` mapper it registers — would
  * re-run on every one of `BattleCanvas`'s ~10Hz re-renders for no reason.
@@ -71,8 +72,9 @@ type Props = {
  * warning) from the render body every single time, so unmemoized this can
  * flood the JS thread badly enough to stall the sim's own rAF loop.
  */
-export const EnemyAtlas = memo(function EnemyAtlas({ kind, bossVariant, buffer }: Props) {
+export const EnemyAtlas = memo(function EnemyAtlas({ kind, bossVariant, frame }: Props) {
   const isBoss = bossVariant != null;
+  const section = isBoss ? BOSS_SECTIONS[bossVariant] : ENEMY_SECTIONS[kind ?? 'scavenger'];
   const bossSrc = isBoss ? BOSS_SOURCES[bossVariant] : null;
   const src = bossSrc ?? SOURCES[kind ?? 'scavenger'];
   const { module: source, width, height } = src;
@@ -87,8 +89,14 @@ export const EnemyAtlas = memo(function EnemyAtlas({ kind, bossVariant, buffer }
 
   const transforms = useRSXformBuffer(capacity, (val, i) => {
     'worklet';
-    const data = buffer.value;
-    const base = i * FIELDS_PER_SLOT;
+    const data = frame.value;
+    // Sections are packed to the live count, so any slot past it is empty —
+    // a zero scale collapses its quad to nothing.
+    if (i >= secCount(data, section)) {
+      val.set(0, 0, 0, 0);
+      return;
+    }
+    const base = secOffset(data, section) + i * FIELDS_PER_SLOT;
     const scale = data[base + 2];
     const x = data[base];
     const y = data[base + 1];
@@ -115,7 +123,13 @@ export const EnemyAtlas = memo(function EnemyAtlas({ kind, bossVariant, buffer }
   // what makes a shot land on a *specific* body in a crowded swarm.
   const colors = useColorBuffer(capacity, (val, i) => {
     'worklet';
-    const flash = buffer.value[i * FIELDS_PER_SLOT + HIT_FLASH_OFFSET] * 0.85;
+    const data = frame.value;
+    // Slots past the live count are hidden by a zero-scale transform anyway;
+    // a zero colour keeps them a no-op under `screen` blending regardless.
+    const flash =
+      i < secCount(data, section)
+        ? data[secOffset(data, section) + i * FIELDS_PER_SLOT + HIT_FLASH_OFFSET] * 0.85
+        : 0;
     val[0] = flash;
     val[1] = flash;
     val[2] = flash;

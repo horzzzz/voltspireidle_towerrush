@@ -62,7 +62,11 @@ export function startWave(world: WorldState, wave: number): void {
   world.waveSpawnTotal = batch.length;
   world.spawnTimer = 0;
 
-  emitVfx(world, { type: 'waveStart', wave, isBoss: config.isBoss });
+  const event = emitVfx(world, 'waveStart');
+  if (event) {
+    event.wave = wave;
+    event.isBoss = config.isBoss;
+  }
 }
 
 /** Entries of the *current* wave still waiting to spawn — the HUD bar's numerator. */

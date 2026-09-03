@@ -5,8 +5,10 @@ import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import { ARENA_HEIGHT, ARENA_WIDTH, ATTACK_RANGE, TOWER_X, TOWER_Y } from '@/game/data/arena';
 import { getSkin } from '@/game/data/skins';
 import { useMetaStore } from '@/game/state/meta-store';
-import { ADDITIVE_CAP, G, NORMAL_CAP, VFX } from '@/game/vfx/layout';
+import { BSec, secOffset } from '@/game/vfx/frame-buffer';
+import { ADDITIVE_CAP, G, NORMAL_CAP } from '@/game/vfx/layout';
 import { EnemyAtlas } from './enemy-atlas';
+import { PerfFlags } from './perf-monitor';
 import { ParticleLayer } from './vfx/particle-layer';
 import { VfxPicture } from './vfx/vfx-picture';
 
@@ -15,20 +17,8 @@ const STOCK_TOWER = require('@/assets/images/battle/tower.png');
 const TOWER_SIZE = 132; // design px — matches the Figma tower_1 frame (~122×124)
 
 type Props = {
-  buffers: {
-    scavenger: SharedValue<Float32Array>;
-    hulk: SharedValue<Float32Array>;
-    runner: SharedValue<Float32Array>;
-    boss0: SharedValue<Float32Array>;
-    boss1: SharedValue<Float32Array>;
-    boss2: SharedValue<Float32Array>;
-  };
-  vfx: {
-    additive: SharedValue<Float32Array>;
-    normal: SharedValue<Float32Array>;
-    /** Globals + numbers + beams + rings, packed at the VFX offsets (layout.ts). */
-    buffer: SharedValue<Float32Array>;
-  };
+  /** Everything the scene draws this frame, in one buffer — see vfx/frame-buffer.ts. */
+  frame: SharedValue<Float32Array>;
 };
 
 /**
@@ -40,7 +30,7 @@ type Props = {
  * That same group carries the camera shake, so impact never disturbs the RN
  * HUD laid over this canvas — only the scene inside it moves.
  */
-export function BattleCanvas({ buffers, vfx }: Props) {
+export function BattleCanvas({ frame }: Props) {
   const { ref, size } = useCanvasSize();
   const bg = useImage(BG);
   const skin = useMetaStore((s) => getSkin(s.selectedSkin));
@@ -49,19 +39,17 @@ export function BattleCanvas({ buffers, vfx }: Props) {
 
   // The tower alone carries the firing recoil, on top of whatever the scene
   // group is already doing.
-  const towerTransform = useDerivedValue(() => [
-    { translateX: vfx.buffer.value[VFX.globals + G.recoilX] },
-    { translateY: vfx.buffer.value[VFX.globals + G.recoilY] },
-  ]);
+  const towerTransform = useDerivedValue(() => {
+    const data = frame.value;
+    const g = secOffset(data, BSec.globals);
+    return [{ translateX: data[g + G.recoilX] }, { translateY: data[g + G.recoilY] }];
+  });
 
-  const sceneTransform = useDerivedValue(
-    () => [
-      { scale },
-      { translateX: vfx.buffer.value[VFX.globals + G.shakeX] },
-      { translateY: vfx.buffer.value[VFX.globals + G.shakeY] },
-    ],
-    [scale],
-  );
+  const sceneTransform = useDerivedValue(() => {
+    const data = frame.value;
+    const g = secOffset(data, BSec.globals);
+    return [{ scale }, { translateX: data[g + G.shakeX] }, { translateY: data[g + G.shakeY] }];
+  }, [scale]);
 
   return (
     <Canvas ref={ref} style={StyleSheet.absoluteFill}>
@@ -86,20 +74,24 @@ export function BattleCanvas({ buffers, vfx }: Props) {
             </Group>
           )}
 
-          <EnemyAtlas kind="scavenger" buffer={buffers.scavenger} />
-          <EnemyAtlas kind="hulk" buffer={buffers.hulk} />
-          <EnemyAtlas kind="runner" buffer={buffers.runner} />
+          <EnemyAtlas kind="scavenger" frame={frame} />
+          <EnemyAtlas kind="hulk" frame={frame} />
+          <EnemyAtlas kind="runner" frame={frame} />
 
           {/* Bosses draw on top of the regular swarm. */}
-          <EnemyAtlas bossVariant={0} buffer={buffers.boss0} />
-          <EnemyAtlas bossVariant={1} buffer={buffers.boss1} />
-          <EnemyAtlas bossVariant={2} buffer={buffers.boss2} />
+          <EnemyAtlas bossVariant={0} frame={frame} />
+          <EnemyAtlas bossVariant={1} frame={frame} />
+          <EnemyAtlas bossVariant={2} frame={frame} />
 
           {/* Debris sits behind the glow so smoke never washes out a spark. */}
-          <ParticleLayer buffer={vfx.normal} capacity={NORMAL_CAP} />
-          <ParticleLayer buffer={vfx.additive} capacity={ADDITIVE_CAP} additive />
+          {PerfFlags.particles && (
+            <>
+              <ParticleLayer frame={frame} section={BSec.normal} capacity={NORMAL_CAP} />
+              <ParticleLayer frame={frame} section={BSec.additive} capacity={ADDITIVE_CAP} additive />
+            </>
+          )}
 
-          <VfxPicture vfx={vfx.buffer} />
+          {PerfFlags.vfxPicture && <VfxPicture frame={frame} />}
         </Group>
       )}
     </Canvas>
