@@ -1,15 +1,17 @@
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { formatNumber } from '@/game/core/numbers';
 import { DAILY_MISSION_REWARD, WEEKLY_LADDER, missionLabel } from '@/game/data/missions';
+import type { MissionInstance } from '@/game/economy/missions';
 import { burstFrom } from '@/game/state/fx-store';
 import { useMetaStore } from '@/game/state/meta-store';
-import type { MissionInstance } from '@/game/economy/missions';
 
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
 const GEM_ICON = require('@/assets/images/menu/icon-gem.png');
@@ -44,7 +46,7 @@ function MiniButton({
   onPress?: () => void;
 }) {
   return (
-    <Pressable
+    <GamePressable
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -54,7 +56,7 @@ function MiniButton({
       ]}>
       <Text style={[styles.miniBtnText, disabled && styles.dim]}>{label}</Text>
       {icon != null && <Image source={icon} style={styles.miniBtnIcon} contentFit="contain" />}
-    </Pressable>
+    </GamePressable>
   );
 }
 
@@ -81,6 +83,7 @@ function DailyRow({ mission, onClaim }: { mission: MissionInstance; onClaim: () 
           disabled={!claimable}
           onPress={() => {
             if (!onClaim()) return;
+            playSfx('reward-claim');
             burstFrom(rowRef.current, 'gems');
             burstFrom(rowRef.current, 'scrap');
           }}
@@ -107,11 +110,12 @@ function WeeklyRow({
 }) {
   const rowRef = useRef<View>(null);
   return (
-    <Pressable
+    <GamePressable
       ref={rowRef}
       disabled={!claimable}
       onPress={() => {
         if (!onClaim()) return;
+        playSfx('reward-claim');
         burstFrom(rowRef.current, 'gems', 1.4);
         burstFrom(rowRef.current, 'scrap', 1.4);
       }}
@@ -123,7 +127,7 @@ function WeeklyRow({
       <RewardChips gems={tier.reward.gems} scrap={tier.reward.scrap} dim={!claimable && !claimed} />
       {claimable && <Text style={styles.claim}>Claim</Text>}
       {claimed && <Text style={styles.claimedText}>Claimed</Text>}
-    </Pressable>
+    </GamePressable>
   );
 }
 
@@ -150,12 +154,12 @@ export default function MissionsScreen() {
       <Text style={styles.title}>Missions</Text>
 
       <View style={styles.tabs}>
-        <Pressable onPress={() => setTab('daily')} hitSlop={8}>
+        <GamePressable onPress={() => setTab('daily')} hitSlop={8}>
           <Text style={[styles.tab, tab !== 'daily' && styles.tabInactive]}>Daily</Text>
-        </Pressable>
-        <Pressable onPress={() => setTab('weekly')} hitSlop={8}>
+        </GamePressable>
+        <GamePressable onPress={() => setTab('weekly')} hitSlop={8}>
           <Text style={[styles.tab, tab !== 'weekly' && styles.tabInactive]}>Weekly</Text>
-        </Pressable>
+        </GamePressable>
       </View>
 
       {tab === 'daily' ? (

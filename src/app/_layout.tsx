@@ -13,6 +13,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { LoadingScreen } from '@/components/splash/loading-screen';
 import { StartScreen } from '@/components/splash/start-screen';
+import { initAudio, startMusic } from '@/game/audio/engine';
+import { applySavedAudioSettings } from '@/game/state/audio-store';
 import { useMetaStore } from '@/game/state/meta-store';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -31,12 +33,27 @@ export default function RootLayout() {
     if (fontsLoaded) SplashScreen.hideAsync().catch(() => {});
   }, [fontsLoaded]);
 
+  // Decoding twenty clips takes a moment, so it runs alongside the fonts and
+  // the loading bar rather than after them. Nothing waits on it: every entry
+  // point in `audio/engine.ts` is a no-op until it resolves, which at worst
+  // costs the very first tap its click.
+  useEffect(() => {
+    // Before init, so the engine builds its gain nodes at the saved level
+    // rather than at full and then correcting.
+    applySavedAudioSettings();
+    void initAudio();
+  }, []);
+
   const handleLoadingDone = useCallback(() => setPhase('start'), []);
   const handleStart = useCallback(() => {
     // Rolls today's daily/weekly missions if the calendar day/week has
     // turned over since the last session — before any screen that reads
     // them mounts, so Missions never flashes yesterday's list first.
     useMetaStore.getState().ensureMissionsForToday();
+    // The theme starts here rather than on mount because this tap is the only
+    // user gesture the app is guaranteed to get, and a browser hands out a
+    // suspended audio context until it sees one.
+    startMusic();
     setPhase('app');
   }, []);
 

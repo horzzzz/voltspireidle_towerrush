@@ -1,8 +1,9 @@
 import { Image } from 'expo-image';
 import { useTabTrigger } from 'expo-router/ui';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { MenuColors } from '@/constants/theme';
 
 const ACTIVE_FRAME = require('@/assets/images/menu/nav-active.png');
@@ -32,7 +33,7 @@ export function BottomNav() {
       {ITEMS.map((item) => {
         const focused = Boolean(getTrigger(item.name)?.isFocused);
         return (
-          <Pressable
+          <GamePressable
             key={item.name}
             onPress={() => switchTab(item.name, {})}
             style={styles.item}
@@ -50,7 +51,7 @@ export function BottomNav() {
               style={[styles.icon, focused && styles.iconFocused]}
               contentFit="contain"
             />
-          </Pressable>
+          </GamePressable>
         );
       })}
     </View>

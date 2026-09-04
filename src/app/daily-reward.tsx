@@ -1,13 +1,15 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { RewardCard } from '@/components/daily-reward/reward-card';
+import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { SplashBackground } from '@/components/splash/splash-background';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { dailyRewardForDay } from '@/game/data/daily';
 import { dayKey, effectiveNow } from '@/game/economy/clock';
 import { burstFrom } from '@/game/state/fx-store';
@@ -54,12 +56,13 @@ export default function DailyRewardScreen() {
       <SplashBackground />
 
       <View style={styles.safeArea}>
-        <Pressable
+        <GamePressable
           onPress={close}
+          sfx="ui-back"
           hitSlop={12}
           style={[styles.close, { top: insets.top + 8 }]}>
           <Text style={styles.closeText}>✕</Text>
-        </Pressable>
+        </GamePressable>
 
         <ScrollView
           contentContainerStyle={[
@@ -105,9 +108,10 @@ export default function DailyRewardScreen() {
             </View>
           </View>
 
-          <Pressable
+          <GamePressable
             onPress={() => {
               if (!claimDaily()) return;
+              playSfx('reward-claim');
               // Day 7 is the payout the ladder builds to — give it the works.
               burstFrom(activeCardRef.current, nextDay % 7 === 0 ? 'jackpot' : 'gems', nextDay % 7 === 0 ? 2.2 : 1.4);
               // Let the burst read before the modal slides away.
@@ -121,7 +125,7 @@ export default function DailyRewardScreen() {
             ]}>
             <Image source={CLAIM_BUTTON} style={StyleSheet.absoluteFill} contentFit="fill" />
             <Text style={styles.claimText}>{alreadyClaimedToday ? 'Claimed' : `Claim day ${nextDay}`}</Text>
-          </Pressable>
+          </GamePressable>
         </ScrollView>
       </View>
 

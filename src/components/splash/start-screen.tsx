@@ -1,9 +1,10 @@
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SplashBackground } from '@/components/splash/splash-background';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { openPrivacy, openTerms } from '@/constants/links';
 import { Fonts, SplashColors } from '@/constants/theme';
 
@@ -31,13 +32,13 @@ export function StartScreen({ onStart }: StartScreenProps) {
         </View>
 
         <View style={styles.footer}>
-          <Pressable
+          <GamePressable
             onPress={onStart}
             onPressIn={() => setPressed(true)}
             onPressOut={() => setPressed(false)}
             style={[styles.button, pressed && styles.buttonPressed]}>
             <Image source={BUTTON_ASSET} style={styles.buttonImg} contentFit="contain" />
-          </Pressable>
+          </GamePressable>
 
           <Text style={styles.legal}>
             By tapping “Let’s Play” you confirm that you 18+ and
@@ -45,13 +46,13 @@ export function StartScreen({ onStart }: StartScreenProps) {
 
           <View style={styles.links}>
             <Text style={styles.linkText}>our</Text>
-            <Pressable onPress={openTerms} hitSlop={12}>
+            <GamePressable onPress={openTerms} hitSlop={12}>
               <Text style={[styles.linkText, styles.linkUnderline]}>Terms of Use</Text>
-            </Pressable>
+            </GamePressable>
             <Text style={styles.linkText}>&amp;</Text>
-            <Pressable onPress={openPrivacy} hitSlop={12}>
+            <GamePressable onPress={openPrivacy} hitSlop={12}>
               <Text style={[styles.linkText, styles.linkUnderline]}>Privacy policy</Text>
-            </Pressable>
+            </GamePressable>
           </View>
         </View>
       </SafeAreaView>

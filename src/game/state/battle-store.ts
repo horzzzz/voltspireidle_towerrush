@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { WAVE_COOLDOWN_DURATION, WAVE_SPAWN_PHASE_DURATION } from '../data/balance';
-import { createInitialUpgradeLevels, getTowerMaxHealth } from '../data/tower-stats';
+import { createInitialUpgradeLevels, getTowerMaxHealth, UPGRADE_ORDER } from '../data/tower-stats';
 import { waveProgressFraction } from '../core/formulas';
 import { waveEnemiesLeftToSpawn } from '../core/systems/spawn';
 import { defaultRunLoadout } from '../core/types';
@@ -67,7 +67,20 @@ const INITIAL: BattleSnapshot = {
   result: null,
 };
 
-export const useBattleStore = create<BattleStore>((set) => ({
+/**
+ * Whether two level maps hold the same numbers. Ten integer compares and no
+ * allocation — see `publish` for why the identity of that object is load
+ * bearing in both directions.
+ */
+function sameUpgradeLevels(a: Record<UpgradeId, number>, b: Record<UpgradeId, number>): boolean {
+  for (let i = 0; i < UPGRADE_ORDER.length; i++) {
+    const id = UPGRADE_ORDER[i];
+    if (a[id] !== b[id]) return false;
+  }
+  return true;
+}
+
+export const useBattleStore = create<BattleStore>((set, get) => ({
   ...INITIAL,
   publish: (world) => {
     // Bosses can outlive their own wave now that waves run on a clock, so the
@@ -79,6 +92,35 @@ export const useBattleStore = create<BattleStore>((set) => ({
       if (enemy.isBoss && (boss == null || enemy.id > boss.id)) boss = enemy;
     }
     const bossHpFraction = boss ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : world.bossPending ? 1 : 0;
+
+    // `world.tower.levels` is the sim's own live object and `buyUpgrade`
+    // raises a level by mutating it in place, so publishing it directly hands
+    // the store a reference that is *never* new — and zustand compares with
+    // `Object.is`. `UpgradeBar` selects exactly this object to derive every
+    // row's level and price from, so it would never re-render: the bar stayed
+    // frozen on the prices it read when the battle screen mounted, while the
+    // sim went on charging the real (escalating) ones. A row could therefore
+    // look affordable, refuse to buy, and then bill more than it displayed.
+    //
+    // That was masked until the bar stopped subscribing to `charge`, which had
+    // been re-rendering it ~10x a second and re-reading the mutated object by
+    // accident.
+    //
+    // So copy — but only when the numbers actually differ. Copying every
+    // publish would restore the bug's mirror image, re-rendering the six-row
+    // list ten times a second for values that almost never change, which is
+    // precisely what dropping the `charge` subscription was meant to stop.
+    // This way the reference is stable while nothing is bought, and new
+    // exactly once when something is.
+    //
+    // The other two non-scalars here are safe: `loadout` is frozen for the
+    // run's lifetime and `result` is built once when the run ends. Anything
+    // added to this snapshot that the sim mutates in place needs the same
+    // treatment.
+    const previousLevels = get().upgradeLevels;
+    const upgradeLevels = sameUpgradeLevels(previousLevels, world.tower.levels)
+      ? previousLevels
+      : { ...world.tower.levels };
 
     set({
       phase: world.phase,
@@ -99,7 +141,7 @@ export const useBattleStore = create<BattleStore>((set) => ({
       killCount: world.killCount,
       towerHealth: world.tower.health,
       towerMaxHealth: getTowerMaxHealth(world.tower.levels, world.loadout),
-      upgradeLevels: world.tower.levels,
+      upgradeLevels,
       loadout: world.loadout,
       speedMultiplier: world.speedMultiplier,
       result: world.result,

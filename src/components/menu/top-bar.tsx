@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors } from '@/constants/theme';
 import { useFxStore, type FxAnchor } from '@/game/state/fx-store';
@@ -72,9 +73,9 @@ export function TopBar({ scrap = '0', gems = '0', onEnergyPress }: TopBarProps) 
         </Balance>
       </View>
       { ADS_ENABLED &&
-          <Pressable onPress={onEnergyPress} hitSlop={8}>
+          <GamePressable onPress={onEnergyPress} hitSlop={8}>
             <Image source={ENERGY_PILL} style={styles.energy} contentFit="contain" />
-          </Pressable>
+          </GamePressable>
       }
     </View>
   );

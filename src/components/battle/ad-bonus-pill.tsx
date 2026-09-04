@@ -1,5 +1,7 @@
 import { Image } from 'expo-image';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+
+import { GamePressable } from '@/components/ui/game-pressable';
 
 type AdBonusPillProps = {
   source: number;
@@ -15,9 +17,9 @@ type AdBonusPillProps = {
  */
 export function AdBonusPill({ source, aspectRatio, onPress }: AdBonusPillProps) {
   return (
-    <Pressable onPress={onPress} hitSlop={6} style={({ pressed }) => [styles.pill, { aspectRatio }, pressed && styles.pressed]}>
+    <GamePressable onPress={onPress} hitSlop={6} style={({ pressed }) => [styles.pill, { aspectRatio }, pressed && styles.pressed]}>
       <Image source={source} style={StyleSheet.absoluteFill} contentFit="fill" />
-    </Pressable>
+    </GamePressable>
   );
 }
 

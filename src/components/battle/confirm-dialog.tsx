@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors } from '@/constants/theme';
 
 type ConfirmDialogProps = {
@@ -35,16 +36,17 @@ export function ConfirmDialog({ visible, title, message, confirmLabel, onConfirm
           <Text style={styles.message}>{message}</Text>
 
           <View style={styles.row}>
-            <Pressable
+            <GamePressable
               onPress={onCancel}
+              sfx="ui-back"
               style={({ pressed }) => [styles.button, styles.cancelButton, pressed && styles.pressed]}>
               <Text style={styles.buttonText}>Cancel</Text>
-            </Pressable>
-            <Pressable
+            </GamePressable>
+            <GamePressable
               onPress={onConfirm}
               style={({ pressed }) => [styles.button, styles.confirmButton, pressed && styles.pressed]}>
               <Text style={[styles.buttonText, styles.confirmText]}>{confirmLabel}</Text>
-            </Pressable>
+            </GamePressable>
           </View>
         </View>
       </View>

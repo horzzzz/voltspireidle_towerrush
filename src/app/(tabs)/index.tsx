@@ -1,11 +1,12 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SideRail } from '@/components/menu/side-rail';
 import { StatsPanel } from '@/components/menu/stats-panel';
 import { TopBar } from '@/components/menu/top-bar';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
@@ -89,20 +90,20 @@ export default function GameScreen() {
             <Text style={styles.bonusSecondary} numberOfLines={1} adjustsFontSizeToFit>
               x2 scrap bonus for 10 minutes
             </Text>
-            <Pressable onPress={noop} hitSlop={8}>
+            <GamePressable onPress={noop} hitSlop={8}>
               <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
-            </Pressable>
+            </GamePressable>
           </View>
         )}
       </View>
 
       <View style={styles.spacer} />
 
-      <Pressable
+      <GamePressable
         onPress={() => router.push('/battle')}
         style={({ pressed }) => [styles.battle, pressed && styles.battlePressed]}>
         <Image source={BATTLE_BUTTON} style={styles.battleImg} contentFit="contain" />
-      </Pressable>
+      </GamePressable>
     </ScrollView>
   );
 }

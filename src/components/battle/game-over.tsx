@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
-import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { BattleColors, Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatInt, formatNumber } from '@/game/core/numbers';
@@ -152,24 +153,28 @@ function RunOverPanel({ result, onRestart, onExit }: GameOverProps & { result: R
 
         {/* TODO(ads): rewarded video, doubles scrapEarned + gemsCollected before banking. Inert until AdMob is wired up. */}
         {ADS_ENABLED && (
-          <Pressable onPress={noop} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
+          <GamePressable onPress={noop} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
             <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
             <View style={styles.doubleContent}>
               <Text style={styles.doubleText}>x2</Text>
               <Image source={SCRAP_ICON} style={styles.scrapIcon} contentFit="contain" />
               <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
             </View>
-          </Pressable>
+          </GamePressable>
         )}
 
-        <Pressable onPress={onRestart} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
+        <GamePressable onPress={onRestart} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
           <Image source={PILL} style={StyleSheet.absoluteFill} contentFit="fill" />
           <Text style={styles.restartText}>Restart</Text>
-        </Pressable>
+        </GamePressable>
 
-        <Pressable onPress={onExit} hitSlop={10} style={({ pressed }) => pressed && styles.pressed}>
+        <GamePressable
+          onPress={onExit}
+          sfx="ui-back"
+          hitSlop={10}
+          style={({ pressed }) => pressed && styles.pressed}>
           <Text style={styles.exitText}>To menu</Text>
-        </Pressable>
+        </GamePressable>
       </View>
     </Animated.View>
   );

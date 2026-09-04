@@ -1,8 +1,9 @@
 import { Image, ImageBackground } from 'expo-image';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { formatNumber } from '@/game/core/numbers';
 import { isSkinUnlocked, SKINS, type SkinDef } from '@/game/data/skins';
@@ -25,7 +26,7 @@ function SkinCard({
 }) {
   const locked = state === 'locked';
   return (
-    <Pressable
+    <GamePressable
       disabled={locked || state === 'selected'}
       onPress={onSelect}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
@@ -61,7 +62,7 @@ function SkinCard({
           </View>
         )}
       </ImageBackground>
-    </Pressable>
+    </GamePressable>
   );
 }
 

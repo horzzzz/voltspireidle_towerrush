@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
 import { useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { PriceTag } from '@/components/upgrades/price-tag';
 import { Fonts, MenuColors } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { burstFrom } from '@/game/state/fx-store';
 
 const PANEL_BG = require('@/assets/images/ui/panel-bar.png');
@@ -19,10 +21,11 @@ type UnlockPanelProps = {
 export function UnlockPanel({ label, price, onPress }: UnlockPanelProps) {
   const panelRef = useRef<View>(null);
   return (
-    <Pressable
+    <GamePressable
       ref={panelRef}
       onPress={() => {
         if (onPress() === false) return;
+        playSfx('unlock');
         // A branch opening up is a bigger deal than a level — give it the
         // jackpot treatment rather than the ordinary level-up pop.
         burstFrom(panelRef.current, 'jackpot', 1.4);
@@ -33,7 +36,7 @@ export function UnlockPanel({ label, price, onPress }: UnlockPanelProps) {
         <Text style={styles.label}>{label}</Text>
         <PriceTag price={price} small />
       </View>
-    </Pressable>
+    </GamePressable>
   );
 }
 

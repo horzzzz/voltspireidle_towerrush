@@ -1,14 +1,16 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RewardOverlay } from '@/components/fx/reward-overlay';
 import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { formatNumber } from '@/game/core/numbers';
 import { SCRAP_PACKS, SHOP_DAILY_GIFT_GEMS } from '@/game/data/shop';
 import { burstFrom } from '@/game/state/fx-store';
@@ -59,10 +61,11 @@ function ScrapPack({
 }) {
   const rowRef = useRef<View>(null);
   return (
-    <Pressable
+    <GamePressable
       ref={rowRef}
       onPress={() => {
         if (!onBuy()) return;
+        playSfx('purchase');
         burstFrom(rowRef.current, 'scrap', 1.6);
       }}
       disabled={!affordable}
@@ -78,7 +81,7 @@ function ScrapPack({
           <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
         </View>
       </Panel>
-    </Pressable>
+    </GamePressable>
   );
 }
 
@@ -109,18 +112,18 @@ export default function ShopScreen() {
 
         <View style={styles.tabs}>
           {ADS_ENABLED && (
-            <Pressable onPress={() => setTab('daily')} hitSlop={8}>
+            <GamePressable onPress={() => setTab('daily')} hitSlop={8}>
               <Text style={[styles.tab, tab !== 'daily' && styles.tabInactive]}>Daily</Text>
-            </Pressable>
+            </GamePressable>
           )}
-          <Pressable onPress={() => setTab('catalog')} hitSlop={8}>
+          <GamePressable onPress={() => setTab('catalog')} hitSlop={8}>
             <Text style={[styles.tab, tab !== 'catalog' && styles.tabInactive]}>Catalog</Text>
-          </Pressable>
+          </GamePressable>
         </View>
 
         {tab === 'daily' ? (
           <View style={styles.list}>
-            <Pressable onPress={noop} style={({ pressed }) => pressed && styles.panelPressed}>
+            <GamePressable onPress={noop} style={({ pressed }) => pressed && styles.panelPressed}>
               <Panel>
                 <Image source={VIDEO_ICON} style={styles.videoIcon} contentFit="contain" />
                 <Text style={styles.panelTitle}>Daily gems gift</Text>
@@ -129,7 +132,7 @@ export default function ShopScreen() {
                   <Image source={GEM_ICON} style={styles.gemIcon} contentFit="contain" />
                 </View>
               </Panel>
-            </Pressable>
+            </GamePressable>
           </View>
         ) : (
           <View style={styles.list}>
@@ -144,14 +147,15 @@ export default function ShopScreen() {
           </View>
         )}
 
-        <Pressable
+        <GamePressable
           onPress={close}
+          sfx="ui-back"
           style={({ pressed }) => [styles.back, pressed && styles.panelPressed]}>
           <Image source={PILL} style={styles.backImg} contentFit="fill" />
           <View style={[StyleSheet.absoluteFill, styles.backContent]}>
             <Text style={styles.backText}>Back</Text>
           </View>
-        </Pressable>
+        </GamePressable>
       </ScrollView>
 
       <RewardOverlay />

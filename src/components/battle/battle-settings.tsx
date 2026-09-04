@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StyleSheet, Text, View } from 'react-native';
 
 import { ConfirmDialog } from './confirm-dialog';
 import { Toggle } from '@/components/settings/toggle';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors } from '@/constants/theme';
+import { useAudioSettingsStore } from '@/game/state/audio-store';
 
-type Settings = { music: boolean; sound: boolean; vibration: boolean; notification: boolean };
-const DEFAULTS: Settings = { music: true, sound: false, vibration: true, notification: false };
+/** Only the two switches that aren't wired to anything yet — see `useAudioSettingsStore` for the rest. */
+type LocalSettings = { vibration: boolean; notification: boolean };
+const LOCAL_DEFAULTS: LocalSettings = { vibration: true, notification: false };
 
 type BattleSettingsProps = {
   visible: boolean;
@@ -19,10 +22,11 @@ type BattleSettingsProps = {
 /**
  * In-battle settings overlay (Figma node 1:1606) — same toggle set and panel
  * chrome as the main menu's `src/app/settings.tsx`, plus Retire Run and
- * Exit to menu, which only exist here. Kept as its own local state rather
- * than wiring into a shared settings store — that unification is follow-up
- * work for when the other screens get their pass, not part of the battle
- * engine.
+ * Exit to menu, which only exist here. Music and Sound are the shared,
+ * persisted `useAudioSettingsStore` — the same two switches the main menu
+ * writes, so flipping one here is still off when the player next opens
+ * Settings from the hub. Vibration and Notification stay local: neither is
+ * hooked up to anything yet.
  *
  * A plain absolute-fill overlay, not RN's `<Modal>` — the battle screen
  * (`battle.tsx`) is itself presented as a `fullScreenModal` route, and
@@ -34,9 +38,14 @@ type BattleSettingsProps = {
  * with the rest of the screen, same as everything else here.
  */
 export function BattleSettings({ visible, onClose, onRetire, onExit }: BattleSettingsProps) {
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const music = useAudioSettingsStore((s) => s.music);
+  const sound = useAudioSettingsStore((s) => s.sound);
+  const setMusic = useAudioSettingsStore((s) => s.setMusic);
+  const setSound = useAudioSettingsStore((s) => s.setSound);
+
+  const [settings, setSettings] = useState<LocalSettings>(LOCAL_DEFAULTS);
   const [exitConfirmVisible, setExitConfirmVisible] = useState(false);
-  const set = (key: keyof Settings) => (next: boolean) => setSettings((s) => ({ ...s, [key]: next }));
+  const set = (key: keyof LocalSettings) => (next: boolean) => setSettings((s) => ({ ...s, [key]: next }));
 
   // Without a native Modal there's no built-in `onRequestClose` for the
   // Android hardware back button — wire it up ourselves so it still closes
@@ -58,23 +67,26 @@ export function BattleSettings({ visible, onClose, onRetire, onExit }: BattleSet
     <View style={styles.backdrop}>
       <View style={styles.panel}>
         <View style={styles.panelInner}>
-          <Row label="Music" value={settings.music} onChange={set('music')} />
-          <Row label="Sound" value={settings.sound} onChange={set('sound')} />
+          <Row label="Music" value={music} onChange={setMusic} />
+          <Row label="Sound" value={sound} onChange={setSound} />
           <View style={styles.groupGap} />
           <Row label="Vibration" value={settings.vibration} onChange={set('vibration')} />
           <Row label="Notification" value={settings.notification} onChange={set('notification')} />
 
-          <Pressable onPress={onRetire} style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
+          <GamePressable onPress={onRetire} style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
             <Text style={styles.buttonText}>Retire run</Text>
-          </Pressable>
-          <Pressable onPress={onClose} style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
+          </GamePressable>
+          <GamePressable
+            onPress={onClose}
+            sfx="ui-back"
+            style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
             <Text style={styles.buttonText}>Close</Text>
-          </Pressable>
-          <Pressable
+          </GamePressable>
+          <GamePressable
             onPress={() => setExitConfirmVisible(true)}
             style={({ pressed }) => [styles.button, styles.retireButton, pressed && styles.pressed]}>
             <Text style={[styles.buttonText, styles.retireText]}>To menu</Text>
-          </Pressable>
+          </GamePressable>
         </View>
       </View>
 

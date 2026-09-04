@@ -1,6 +1,5 @@
-import { Storage } from 'expo-sqlite/kv-store';
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { dayKey, effectiveNow, weekKey } from '../economy/clock';
 import { applyRunToMissions, incrementMissionProgress, rollDailyMissions, type MissionInstance } from '../economy/missions';
@@ -31,15 +30,7 @@ import { getVoltage, isVoltageUnlocked } from '../data/voltages';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, rollWheelIndex, type WheelSector } from '../data/wheel';
 import { Rng } from '../core/rng';
 import type { RunSummary } from '../core/types';
-
-/** Thin sync adapter — `expo-sqlite/kv-store` is a drop-in AsyncStorage
- * replacement but also exposes sync methods, which keep zustand's persist
- * hydration simple (no loading-state dance for a couple of small numbers). */
-const sqliteStateStorage: StateStorage = {
-  getItem: (name) => Storage.getItemSync(name),
-  setItem: (name, value) => Storage.setItemSync(name, value),
-  removeItem: (name) => Storage.removeItemSync(name),
-};
+import { sqliteStateStorage } from './persist-storage';
 
 interface DailyRewardState {
   day: number;

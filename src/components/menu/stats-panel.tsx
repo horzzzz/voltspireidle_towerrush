@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors } from '@/constants/theme';
 
 const PANEL_BG = require('@/assets/images/menu/stats-panel.png');
@@ -44,9 +45,9 @@ export function StatsPanel({
         </View>
 
         <View style={styles.rowMid}>
-          <Pressable onPress={onPrev} disabled={!onPrev} hitSlop={12}>
+          <GamePressable onPress={onPrev} disabled={!onPrev} hitSlop={12}>
             <Image source={ARROW} style={[styles.arrow, !onPrev && styles.arrowDim]} contentFit="contain" />
-          </Pressable>
+          </GamePressable>
           <View style={styles.tierBox}>
             <Text style={[styles.tier, locked && styles.tierLocked]}>{tier}</Text>
             {locked ? (
@@ -55,9 +56,9 @@ export function StatsPanel({
               <Text style={styles.mult}>{multiplier}</Text>
             )}
           </View>
-          <Pressable onPress={onNext} disabled={!onNext} hitSlop={12}>
+          <GamePressable onPress={onNext} disabled={!onNext} hitSlop={12}>
             <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !onNext && styles.arrowDim]} contentFit="contain" />
-          </Pressable>
+          </GamePressable>
         </View>
 
         <View style={styles.rowBot}>

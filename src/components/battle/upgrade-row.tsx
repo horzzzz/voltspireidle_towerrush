@@ -1,12 +1,13 @@
 import { Image } from 'expo-image';
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
 import { formatNumber, formatStatValue } from '@/game/core/numbers';
-import { useBattleStore } from '@/game/state/battle-store';
-import { chipAwareStatValue, type UpgradeDef } from '@/game/data/tower-stats';
 import type { RunLoadout, UpgradeId } from '@/game/core/types';
+import { chipAwareStatValue, type UpgradeDef } from '@/game/data/tower-stats';
+import { useBattleStore } from '@/game/state/battle-store';
 
 const ICONS: Record<UpgradeDef['icon'], number> = {
   damage: require('@/assets/images/battle/up-damage.png'),
@@ -58,7 +59,7 @@ export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, loado
   const maxed = cost == null;
 
   return (
-    <Pressable
+    <GamePressable
       onPress={() => onBuy(id)}
       disabled={maxed || !affordable}
       style={({ pressed }) => [styles.row, maxed && styles.rowMaxed, pressed && affordable && styles.pressed]}>
@@ -76,7 +77,7 @@ export const UpgradeRow = memo(function UpgradeRow({ id, def, level, cost, loado
           <Text style={styles.priceUnit}>⚡</Text>
         </View>
       )}
-    </Pressable>
+    </GamePressable>
   );
 });
 

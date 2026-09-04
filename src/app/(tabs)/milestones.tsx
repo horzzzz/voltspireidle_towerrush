@@ -1,14 +1,16 @@
 import { Image } from 'expo-image';
 import { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
-import { burstFrom } from '@/game/state/fx-store';
-import { useMetaStore } from '@/game/state/meta-store';
+import { playSfx } from '@/game/audio/engine';
 import { formatNumber } from '@/game/core/numbers';
 import { MILESTONES, milestoneKey } from '@/game/data/milestones';
 import { getVoltage, isVoltageUnlocked, voltageUnlockRequirement, VOLTAGES } from '@/game/data/voltages';
+import { burstFrom } from '@/game/state/fx-store';
+import { useMetaStore } from '@/game/state/meta-store';
 
 const ARROW = require('@/assets/images/menu/arrow.png');
 const SCRAP_ICON = require('@/assets/images/menu/icon-scrap.png');
@@ -47,11 +49,12 @@ function MilestoneRow({
   const cardRef = useRef<View>(null);
   return (
     <View style={styles.row}>
-      <Pressable
+      <GamePressable
         ref={cardRef}
         disabled={state !== 'claimable'}
         onPress={() => {
           if (!onClaim()) return;
+          playSfx('reward-claim');
           // Both currencies fly out of the card that was tapped, each into its
           // own counter — gems a beat behind scrap so they read as two payouts.
           burstFrom(cardRef.current, 'scrap', 1.2);
@@ -66,7 +69,7 @@ function MilestoneRow({
         <RewardChip icon={GEM_ICON} amount={gems} />
         {state === 'claimable' && <Text style={styles.claim}>Claim</Text>}
         {state === 'claimed' && <Text style={styles.claimed}>Claimed</Text>}
-      </Pressable>
+      </GamePressable>
 
       <View style={styles.tick}>
         <View style={[styles.rail, first && styles.railTop, last && styles.railBottom]} />
@@ -105,18 +108,18 @@ export default function MilestonesScreen() {
       <Text style={styles.title}>Milestones</Text>
 
       <View style={styles.pager}>
-        <Pressable hitSlop={12} disabled={!canPrev} onPress={() => setTier((t) => t - 1)}>
+        <GamePressable hitSlop={12} disabled={!canPrev} onPress={() => setTier((t) => t - 1)}>
           <Image source={ARROW} style={[styles.arrow, !canPrev && styles.arrowDim]} contentFit="contain" />
-        </Pressable>
+        </GamePressable>
         <View style={styles.pagerLabel}>
           <Text style={[styles.voltage, !unlocked && styles.voltageLocked]}>{voltage.name}</Text>
           {!unlocked && req && (
             <Text style={styles.lockHint}>Reach wave {req.wave} on Voltage {req.prevTier}</Text>
           )}
         </View>
-        <Pressable hitSlop={12} disabled={!canNext} onPress={() => setTier((t) => t + 1)}>
+        <GamePressable hitSlop={12} disabled={!canNext} onPress={() => setTier((t) => t + 1)}>
           <Image source={ARROW} style={[styles.arrow, styles.arrowFlip, !canNext && styles.arrowDim]} contentFit="contain" />
-        </Pressable>
+        </GamePressable>
       </View>
 
       <Text style={styles.trackLabel}>Free</Text>

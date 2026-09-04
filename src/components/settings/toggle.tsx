@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts } from '@/constants/theme';
 
 const TRACK_W = 54;
@@ -15,8 +16,9 @@ type ToggleProps = {
 /** On/off switch styled after Figma node 1:267 / 1:273. */
 export function Toggle({ value, onChange }: ToggleProps) {
   return (
-    <Pressable
+    <GamePressable
       onPress={() => onChange(!value)}
+      sfx="ui-toggle"
       hitSlop={10}
       style={[styles.track, value ? styles.trackOn : styles.trackOff]}>
       <Text style={[styles.label, value ? styles.labelOn : styles.labelOff]}>
@@ -29,7 +31,7 @@ export function Toggle({ value, onChange }: ToggleProps) {
           { left: value ? TRACK_W - KNOB - PAD : PAD },
         ]}
       />
-    </Pressable>
+    </GamePressable>
   );
 }
 

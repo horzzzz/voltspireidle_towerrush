@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -14,10 +14,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RewardOverlay } from '@/components/fx/reward-overlay';
-import { LuckWheel } from '@/components/wheel/luck-wheel';
 import { TopBar } from '@/components/menu/top-bar';
 import { SplashBackground } from '@/components/splash/splash-background';
+import { GamePressable } from '@/components/ui/game-pressable';
+import { LuckWheel } from '@/components/wheel/luck-wheel';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { playSfx, startWheelLoop, stopWheelLoop } from '@/game/audio/engine';
 import { formatNumber } from '@/game/core/numbers';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, WHEEL_SECTOR_DEGREES } from '@/game/data/wheel';
 import { useFxStore } from '@/game/state/fx-store';
@@ -99,6 +101,10 @@ export default function WheelScreen() {
     return () => clearInterval(id);
   }, []);
 
+  // Closing the sheet mid-spin would otherwise leave the rattle playing over
+  // the hub for the rest of the clip, with no wheel on screen to explain it.
+  useEffect(() => stopWheelLoop, []);
+
   const effectiveNowMs = Math.max(now, clockHighWater);
   const cooldownRemaining = WHEEL_COOLDOWN_MS - (effectiveNowMs - wheel.lastSpinAt);
   const onCooldown = wheel.freeSpins === 0 && cooldownRemaining > 0;
@@ -112,6 +118,7 @@ export default function WheelScreen() {
     setSpinning(true);
     setResultText(null);
     setOutcome(null);
+    startWheelLoop();
     const target = targetRotationForSector(rotation.value, outcome.sectorIndex);
     // `withTiming`'s completion callback runs on the UI thread (a worklet) —
     // `sectorLabel` is a plain JS function, so it must be called *inside* the
@@ -130,6 +137,9 @@ export default function WheelScreen() {
   // is what re-fires the reaction, and it keeps every shared-value write on
   // the one code path the React Compiler is happy to see them on.
   const applySpinResult = (sector: (typeof WHEEL_SECTORS)[number]) => {
+    // Fades the rattle out rather than cutting it — the wheel eases to a stop
+    // and the clip is almost always still ringing when it gets there.
+    stopWheelLoop();
     setSpinning(false);
     setResultText(sectorLabel(sector));
     setOutcome({ sector });
@@ -157,6 +167,7 @@ export default function WheelScreen() {
 
     if (sector.kind === 'fail') {
       // No prize — the wheel just sags and shudders.
+      playSfx('wheel-fail');
       burst({ kind: 'fail', from });
       wheelShake.value = withSequence(
         withTiming(-7, { duration: 55 }),
@@ -168,6 +179,7 @@ export default function WheelScreen() {
     }
 
     const power = sectorPower(sector);
+    playSfx('wheel-win');
     if (sector.kind === 'gems') burst({ kind: 'gems', from, to: anchors.gems ?? null, power });
     else if (sector.kind === 'scrap') burst({ kind: 'scrap', from, to: anchors.scrap ?? null, power });
     else burst({ kind: 'charge', from, to: null, power });
@@ -207,7 +219,7 @@ export default function WheelScreen() {
           {wheel.freeSpins > 0 && <Text style={styles.timer}>{wheel.freeSpins} free spin(s) available</Text>}
           {onCooldown && <Text style={styles.timer}>Next spin in {formatCountdown(cooldownRemaining)}</Text>}
 
-          <Pressable
+          <GamePressable
             onPress={spin}
             disabled={spinDisabled}
             style={({ pressed }) => [styles.pill, pressed && !spinDisabled && styles.pressed]}>
@@ -215,14 +227,15 @@ export default function WheelScreen() {
             <Text style={[styles.freeSpinText, spinDisabled && styles.disabledText]}>
               {spinning ? 'Spinning…' : wheel.freeSpins > 0 ? 'Free spin' : 'Spin'}
             </Text>
-          </Pressable>
+          </GamePressable>
 
-          <Pressable
+          <GamePressable
             onPress={close}
+            sfx="ui-back"
             style={({ pressed }) => [styles.pillBack, pressed && styles.pressed]}>
             <Image source={PILL} style={styles.pillImg} contentFit="fill" />
             <Text style={styles.backText}>Back</Text>
-          </Pressable>
+          </GamePressable>
         </View>
       </ScrollView>
 

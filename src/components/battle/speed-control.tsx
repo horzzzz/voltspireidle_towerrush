@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { BattleColors, Fonts, MenuColors } from '@/constants/theme';
-import { useBattleStore } from '@/game/state/battle-store';
 import type { SpeedMultiplier } from '@/game/render/use-battle-engine';
+import { useBattleStore } from '@/game/state/battle-store';
 
 const CYCLE: SpeedMultiplier[] = [1, 2, 3];
 
@@ -23,12 +24,12 @@ export function SpeedControl({ onSetSpeed }: { onSetSpeed: (multiplier: SpeedMul
   const speed = useBattleStore((s) => s.speedMultiplier) as SpeedMultiplier;
 
   return (
-    <Pressable
+    <GamePressable
       onPress={() => onSetSpeed(nextSpeed(speed))}
       hitSlop={6}
       style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
       <Text style={styles.text}>×{speed}</Text>
-    </Pressable>
+    </GamePressable>
   );
 }
 

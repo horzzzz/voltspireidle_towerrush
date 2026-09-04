@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
 import { useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { GamePressable } from '@/components/ui/game-pressable';
 import { PriceTag } from '@/components/upgrades/price-tag';
 import { Fonts, MenuColors } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { burstFrom } from '@/game/state/fx-store';
 
 const ICONS = {
@@ -32,10 +34,11 @@ type UpgradeRowProps = {
 export function UpgradeRow({ category, name, from, to, price, maxed, disabled, onBuy }: UpgradeRowProps) {
   const rowRef = useRef<View>(null);
   return (
-    <Pressable
+    <GamePressable
       ref={rowRef}
       onPress={() => {
         if (onBuy?.() === false) return;
+        playSfx('level-up');
         burstFrom(rowRef.current, 'levelUp');
       }}
       disabled={maxed || disabled}
@@ -48,7 +51,7 @@ export function UpgradeRow({ category, name, from, to, price, maxed, disabled, o
         </Text>
       </View>
       {!maxed && price != null && <PriceTag price={price} />}
-    </Pressable>
+    </GamePressable>
   );
 }
 

@@ -1,5 +1,7 @@
 import { Image } from 'expo-image';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+
+import { GamePressable } from '@/components/ui/game-pressable';
 
 const BUTTON_BG = require('@/assets/images/menu/rail-button.png');
 
@@ -18,10 +20,10 @@ export function SideRail({ onPress }: { onPress?: (key: string) => void }) {
   return (
     <View style={styles.rail}>
       {ITEMS.map((item) => (
-        <Pressable key={item.key} onPress={() => onPress?.(item.key)} style={styles.button} hitSlop={4}>
+        <GamePressable key={item.key} onPress={() => onPress?.(item.key)} style={styles.button} hitSlop={4}>
           <Image source={BUTTON_BG} style={StyleSheet.absoluteFill} contentFit="fill" />
           <Image source={item.icon} style={styles.icon} contentFit="contain" />
-        </Pressable>
+        </GamePressable>
       ))}
     </View>
   );

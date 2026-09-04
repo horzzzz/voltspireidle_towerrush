@@ -1,26 +1,39 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Toggle } from '@/components/settings/toggle';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { openPrivacy, openTerms } from '@/constants/links';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { useAudioSettingsStore } from '@/game/state/audio-store';
 
 const BACK_BUTTON = require('@/assets/images/ui/pill-button.png');
 
 const close = () => router.back();
 
-type Settings = { music: boolean; sound: boolean; vibration: boolean; notification: boolean };
+/** Only the two switches that aren't wired to anything yet — see `useAudioSettingsStore` for the rest. */
+type LocalSettings = { vibration: boolean; notification: boolean };
 
-const DEFAULTS: Settings = { music: true, sound: false, vibration: true, notification: false };
+const LOCAL_DEFAULTS: LocalSettings = { vibration: true, notification: false };
 
-/** Settings modal (Figma node 1:229). Values are local state for now. */
+/**
+ * Settings modal (Figma node 1:229). Music and Sound are the persisted
+ * `useAudioSettingsStore` and take effect on whatever is already playing;
+ * Vibration and Notification are still local state, since neither is hooked
+ * up to anything.
+ */
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
-  const set = (key: keyof Settings) => (next: boolean) =>
+  const music = useAudioSettingsStore((s) => s.music);
+  const sound = useAudioSettingsStore((s) => s.sound);
+  const setMusic = useAudioSettingsStore((s) => s.setMusic);
+  const setSound = useAudioSettingsStore((s) => s.setSound);
+
+  const [settings, setSettings] = useState<LocalSettings>(LOCAL_DEFAULTS);
+  const set = (key: keyof LocalSettings) => (next: boolean) =>
     setSettings((s) => ({ ...s, [key]: next }));
 
   return (
@@ -35,29 +48,30 @@ export default function SettingsScreen() {
 
         <View style={styles.panel}>
           <View style={styles.panelInner}>
-            <Row label="Music" value={settings.music} onChange={set('music')} />
-            <Row label="Sound" value={settings.sound} onChange={set('sound')} />
+            <Row label="Music" value={music} onChange={setMusic} />
+            <Row label="Sound" value={sound} onChange={setSound} />
             <View style={styles.groupGap} />
             <Row label="Vibration" value={settings.vibration} onChange={set('vibration')} />
             <Row label="Notification" value={settings.notification} onChange={set('notification')} />
 
             <View style={styles.links}>
-              <Pressable onPress={openTerms} hitSlop={10}>
+              <GamePressable onPress={openTerms} hitSlop={10}>
                 <Text style={styles.link}>Terms of use</Text>
-              </Pressable>
-              <Pressable onPress={openPrivacy} hitSlop={10}>
+              </GamePressable>
+              <GamePressable onPress={openPrivacy} hitSlop={10}>
                 <Text style={styles.link}>Privacy policy</Text>
-              </Pressable>
+              </GamePressable>
             </View>
           </View>
         </View>
 
-        <Pressable
+        <GamePressable
           onPress={close}
+          sfx="ui-back"
           style={({ pressed }) => [styles.back, pressed && styles.backPressed]}>
           <Image source={BACK_BUTTON} style={StyleSheet.absoluteFill} contentFit="fill" />
           <Text style={styles.backText}>Back</Text>
-        </Pressable>
+        </GamePressable>
       </ScrollView>
     </View>
   );

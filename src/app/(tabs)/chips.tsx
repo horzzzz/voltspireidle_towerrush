@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
-import { LayoutChangeEvent, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { LayoutChangeEvent, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TopBar } from '@/components/menu/top-bar';
+import { GamePressable } from '@/components/ui/game-pressable';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import { formatNumber } from '@/game/core/numbers';
 import { CHIP_ICONS } from '@/game/data/chip-icons';
 import {
@@ -83,7 +85,7 @@ function ChipCard({
   const owned = level > 0;
   // A locked chip is inert — no press, no detail card (Figma: only owned chips open).
   return (
-    <Pressable
+    <GamePressable
       style={({ pressed }) => [{ width: w, height: h }, pressed && owned && styles.cardPressed]}
       disabled={!owned}
       onPress={onPress}>
@@ -105,7 +107,7 @@ function ChipCard({
           <Image source={CHIP_LOCKED} style={{ width: h * 0.4, height: h * 0.4 }} contentFit="contain" />
         )}
       </View>
-    </Pressable>
+    </GamePressable>
   );
 }
 
@@ -182,13 +184,15 @@ function ChipDetail({ chipId, onClose }: { chipId: string; onClose: () => void }
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.panel} onPress={() => {}}>
+      <GamePressable style={styles.backdrop} onPress={onClose} sfx="ui-back">
+        {/* Swallows taps so they don't reach the backdrop and close the modal.
+            Silent because nothing happened — a click here would be a lie. */}
+        <GamePressable style={styles.panel} onPress={() => {}} silent>
           <Image source={MODAL_FRAME} style={[styles.fill, styles.panelBg]} contentFit="fill" />
 
-          <Pressable style={styles.close} onPress={onClose} hitSlop={10}>
+          <GamePressable style={styles.close} onPress={onClose} hitSlop={10} sfx="ui-back">
             <Image source={MODAL_CLOSE} style={styles.closeIcon} contentFit="contain" />
-          </Pressable>
+          </GamePressable>
 
           <View style={styles.panelBody}>
             <View style={styles.detailHead}>
@@ -204,12 +208,13 @@ function ChipDetail({ chipId, onClose }: { chipId: string; onClose: () => void }
               {'\n'}Duplicates owned: {duplicates}
             </Text>
 
-            <Pressable
+            <GamePressable
               ref={boxRef}
               style={[styles.levelupBox, !canLevelUp && styles.dim]}
               disabled={!canLevelUp}
               onPress={() => {
                 if (!levelUpChip(chipId)) return;
+                playSfx('level-up');
                 burstFrom(boxRef.current, 'levelUp');
               }}>
               <Image source={LEVELUP_BOX} style={styles.fill} contentFit="fill" />
@@ -225,18 +230,18 @@ function ChipDetail({ chipId, onClose }: { chipId: string; onClose: () => void }
                   </Text>
                 )}
               </View>
-            </Pressable>
+            </GamePressable>
 
-            <Pressable
+            <GamePressable
               style={({ pressed }) => [styles.equip, !canEquip && styles.dim, pressed && canEquip && styles.cardPressed]}
               disabled={!canEquip}
               onPress={() => (isEquipped ? unequipChip(chipId) : equipChip(chipId))}>
               <Image source={EQUIP_BUTTON} style={styles.fill} contentFit="fill" />
               <Text style={styles.equipText}>{equipLabel}</Text>
-            </Pressable>
+            </GamePressable>
           </View>
-        </Pressable>
-      </Pressable>
+        </GamePressable>
+      </GamePressable>
     </Modal>
   );
 }
@@ -291,6 +296,9 @@ export default function ChipsScreen() {
   const handlePull = () => {
     const result = pullChip();
     if (!result) return;
+    // Same split the burst makes: a chip you've never seen is a discovery, a
+    // duplicate is just another level on one you have.
+    playSfx(result.isNew ? 'unlock' : 'level-up');
     burstFrom(buyRef.current, result.isNew ? 'jackpot' : 'levelUp', result.isNew ? 1.8 : 1.2);
     flash(result.id);
   };
@@ -320,7 +328,7 @@ export default function ChipsScreen() {
                   const id = chips.equipped[slot];
                   const chip = id ? CHIP_BY_ID[id] : undefined;
                   return (
-                    <Pressable
+                    <GamePressable
                       key={slot}
                       style={({ pressed }) => [
                         { width: loadoutW, height: loadoutH },
@@ -346,13 +354,13 @@ export default function ChipsScreen() {
                           <Text style={styles.slotEmpty}>Empty</Text>
                         )}
                       </View>
-                    </Pressable>
+                    </GamePressable>
                   );
                 }
                 if (slot > chips.sockets || socketCost == null) return null;
                 const affordable = gems >= socketCost;
                 return (
-                  <Pressable
+                  <GamePressable
                     key={slot}
                     style={({ pressed }) => [
                       { width: loadoutW, height: loadoutH },
@@ -360,14 +368,17 @@ export default function ChipsScreen() {
                       pressed && affordable && styles.cardPressed,
                     ]}
                     disabled={!affordable}
-                    onPress={() => unlockChipSocket()}>
+                    onPress={() => {
+                      if (unlockChipSocket() === false) return;
+                      playSfx('unlock');
+                    }}>
                     <Image source={CARD_FRAME} style={styles.fill} contentFit="fill" />
                     <View style={[styles.fill, styles.centerBody]}>
                       <Text style={styles.slotText}>Unlock</Text>
                       <Text style={styles.slotText}>New socket</Text>
                       <GemAmount amount={socketCost} size={13} />
                     </View>
-                  </Pressable>
+                  </GamePressable>
                 );
               })}
             </View>
@@ -400,7 +411,7 @@ export default function ChipsScreen() {
             />
 
             <View style={styles.buyRow}>
-              <Pressable
+              <GamePressable
                 ref={buyRef}
                 style={({ pressed }) => [
                   { width: buyW, height: buyH },
@@ -413,7 +424,7 @@ export default function ChipsScreen() {
                   <Text style={[styles.buyLabel, !canPull && styles.dim]}>Buy x1</Text>
                   <GemAmount amount={CHIP_PULL_COST} size={11} dim={!canPull} />
                 </View>
-              </Pressable>
+              </GamePressable>
             </View>
           </>
         )}

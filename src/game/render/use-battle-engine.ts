@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useSharedValue } from 'react-native-reanimated';
 
+import { consumeBattleEvents, resetBattleSfx } from '../audio/battle-sfx';
 import { buyUpgrade as buyUpgradeAction } from '../core/upgrades';
 import { advanceSimulation, createWorld, retireRun, setSpeedMultiplier } from '../core/world';
 import type { RunLoadout, UpgradeId } from '../core/types';
@@ -102,6 +103,9 @@ export function useBattleEngine(loadout: RunLoadout) {
 
   useEffect(() => {
     publish(worldRef.current);
+    // Timestamps left over from the last battle screen would otherwise let the
+    // spacing rule swallow this one's opening shots.
+    resetBattleSfx();
 
     const frame = (now: number) => {
       const last = lastFrameRef.current;
@@ -124,6 +128,10 @@ export function useBattleEngine(loadout: RunLoadout) {
           hpFraction: maxHealth > 0 ? world.tower.health / maxHealth : 0,
         });
       }
+      // Sound reads the same queue the VFX system just did, so picture and
+      // audio can never disagree about what happened this tick. Both run
+      // before the rewind below, which is what invalidates the records.
+      consumeBattleEvents(world.vfx, world.vfxCount);
       // Rewind the queue, don't empty it — the records are pooled and get
       // refilled next tick (core/types.ts `emitVfx`).
       world.vfxCount = 0;
@@ -207,6 +215,10 @@ export function useBattleEngine(loadout: RunLoadout) {
         // Leftover sparks from the previous run would otherwise hang in the
         // air over the new one's first frames.
         vfx.reset();
+        // Same idea for sound: the retrigger timestamps belong to a battle
+        // that is over, and they would otherwise swallow the new one's
+        // opening shots.
+        resetBattleSfx();
         publish(worldRef.current);
       },
     }),

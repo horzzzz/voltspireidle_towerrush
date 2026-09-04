@@ -7,12 +7,13 @@ import { GameOver } from '@/components/battle/game-over';
 import { HudTop } from '@/components/battle/hud-top';
 import { UpgradeBar } from '@/components/battle/upgrade-bar';
 import { MenuColors } from '@/constants/theme';
+import { playSfx } from '@/game/audio/engine';
 import type { RunSummary } from '@/game/core/types';
 import { buildRunLoadout } from '@/game/economy/loadout';
-import { useBattleStore } from '@/game/state/battle-store';
-import { useMetaStore } from '@/game/state/meta-store';
 import { BattleCanvas } from '@/game/render/battle-canvas';
 import { useBattleEngine } from '@/game/render/use-battle-engine';
+import { useBattleStore } from '@/game/state/battle-store';
+import { useMetaStore } from '@/game/state/meta-store';
 
 /** Battle screen — the whole "Tap Battle" loop (Figma nodes 1:1512/1:1559). */
 export default function BattleScreen() {
@@ -54,6 +55,19 @@ export default function BattleScreen() {
   useEffect(() => {
     bankResult(result);
   }, [result, bankResult]);
+
+  // The run-over sting, on defeat only. Retiring is the player's own decision
+  // and already has the press sound of the button they chose it with —
+  // answering that with a failure fanfare would read as the game scolding them
+  // for cashing out. `bankedResultRef` is not reused here: it is deliberately
+  // set *before* banking, so it can't distinguish a fresh result from a
+  // re-render.
+  const sungResultRef = useRef<RunSummary | null>(null);
+  useEffect(() => {
+    if (!result || result === sungResultRef.current) return;
+    sungResultRef.current = result;
+    if (result.reason === 'defeated') playSfx('defeat');
+  }, [result]);
 
   // Retires the run (a no-op if it already ended) and banks its Scrap
   // synchronously — not via the reactive effect above, which wouldn't run
