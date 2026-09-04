@@ -28,7 +28,12 @@ export const WHEEL_SECTORS: WheelSector[] = [
 export const WHEEL_SECTOR_DEGREES = 360 / WHEEL_SECTORS.length;
 export const WHEEL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-/** Picks a sector index by weight, using the run's own RNG-free Math.random by default. */
+/**
+ * Picks a sector index by weight. `spinWheel` passes a seeded `Rng` (the same
+ * way `pullChip` does) rather than the default `Math.random`, because a Hermes
+ * cold start hands out a fixed first `Math.random()` value — which made every
+ * fresh install's first spin land on the same (FAIL) wedge.
+ */
 export function rollWheelIndex(random: () => number = Math.random): number {
   const total = WHEEL_SECTORS.reduce((sum, s) => sum + s.weight, 0);
   let roll = random() * total;

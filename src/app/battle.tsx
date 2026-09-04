@@ -14,6 +14,7 @@ import { BattleCanvas } from '@/game/render/battle-canvas';
 import { useBattleEngine } from '@/game/render/use-battle-engine';
 import { useBattleStore } from '@/game/state/battle-store';
 import { useMetaStore } from '@/game/state/meta-store';
+import { reportEvent } from '@/services/analytics';
 
 /** Battle screen — the whole "Tap Battle" loop (Figma nodes 1:1512/1:1559). */
 export default function BattleScreen() {
@@ -41,7 +42,10 @@ export default function BattleScreen() {
   // out of the game-over overlay instead of tapping through it. Shared by
   // the reactive effect below and handleExitToMenu (which needs the bank to
   // have happened *before* it navigates away, not on the next render).
-  const bankedResultRef = useRef<RunSummary | null>(null);
+  // Seeded from whatever the (module-singleton) store already holds, so a
+  // leftover summary from a previous run counts as already-banked. `endRun`
+  // always allocates a fresh `result`, so a real new run still banks.
+  const bankedResultRef = useRef<RunSummary | null>(useBattleStore.getState().result);
   const bankResult = useCallback(
     (r: RunSummary | null) => {
       if (r && r !== bankedResultRef.current) {
@@ -56,17 +60,28 @@ export default function BattleScreen() {
     bankResult(result);
   }, [result, bankResult]);
 
+  // One `game` event per visit to this screen — the run begins on mount.
+  useEffect(() => {
+    reportEvent('game', { action: 'start' });
+  }, []);
+
   // The run-over sting, on defeat only. Retiring is the player's own decision
   // and already has the press sound of the button they chose it with —
   // answering that with a failure fanfare would read as the game scolding them
   // for cashing out. `bankedResultRef` is not reused here: it is deliberately
   // set *before* banking, so it can't distinguish a fresh result from a
   // re-render.
-  const sungResultRef = useRef<RunSummary | null>(null);
+  // Seeded from the store (like `bankedResultRef`) so a leftover result from a
+  // previous run on this module-singleton store can't re-fire the sting / event.
+  const sungResultRef = useRef<RunSummary | null>(useBattleStore.getState().result);
   useEffect(() => {
     if (!result || result === sungResultRef.current) return;
     sungResultRef.current = result;
-    if (result.reason === 'defeated') playSfx('defeat');
+    if (result.reason === 'defeated') {
+      playSfx('defeat');
+      // `loss` only on a real defeat — a voluntary retire is not reported.
+      reportEvent('game', { action: 'loss' });
+    }
   }, [result]);
 
   // Retires the run (a no-op if it already ended) and banks its Scrap

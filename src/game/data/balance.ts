@@ -137,3 +137,6 @@ export const GAME_SPEED_STEP = 1;
  * polynomial above.
  */
 export const ENEMY_HP_SCALE = 1.0;
+
+/** Run rewards (Scrap + Gems) are banked at this multiple of what the run earned. */
+export const RUN_REWARD_MULTIPLIER = 2;

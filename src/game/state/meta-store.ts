@@ -27,6 +27,7 @@ import { dailyRewardForDay } from '../data/daily';
 import { MILESTONES, milestoneKey } from '../data/milestones';
 import { DEFAULT_SKIN_ID, isSkinUnlocked, SKINS } from '../data/skins';
 import { getVoltage, isVoltageUnlocked } from '../data/voltages';
+import { RUN_REWARD_MULTIPLIER } from '../data/balance';
 import { WHEEL_COOLDOWN_MS, WHEEL_SECTORS, rollWheelIndex, type WheelSector } from '../data/wheel';
 import { Rng } from '../core/rng';
 import type { RunSummary } from '../core/types';
@@ -176,8 +177,8 @@ export const useMetaStore = create<MetaState>()(
 
         set((s) => ({
           ...withClockAdvance(now),
-          scrap: s.scrap + summary.scrapEarned,
-          gems: s.gems + summary.gemsCollected,
+          scrap: s.scrap + summary.scrapEarned * RUN_REWARD_MULTIPLIER,
+          gems: s.gems + summary.gemsCollected * RUN_REWARD_MULTIPLIER,
           highestWaveByVoltage: {
             ...s.highestWaveByVoltage,
             [tier]: Math.max(s.highestWaveByVoltage[tier] ?? 0, summary.waveReached),
@@ -315,7 +316,13 @@ export const useMetaStore = create<MetaState>()(
         const usingFreeSpin = state.wheel.freeSpins > 0;
         if (!usingFreeSpin && now - state.wheel.lastSpinAt < WHEEL_COOLDOWN_MS) return null;
 
-        const sectorIndex = rollWheelIndex();
+        // Seeded like `pullChip`, not `Math.random` — a Hermes cold start
+        // returns a fixed first `Math.random()`, so every fresh install's first
+        // spin rolled the identical (FAIL) index.
+        const seed =
+          (Date.now() ^ Math.imul(state.wheel.freeSpins + 1, 2654435761) ^ (state.wheel.lastSpinAt | 0)) >>> 0;
+        const rng = new Rng(seed);
+        const sectorIndex = rollWheelIndex(() => rng.next());
         const sector = WHEEL_SECTORS[sectorIndex];
 
         // Consumes the spin right away (cooldown reset / one free spin

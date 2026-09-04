@@ -15,6 +15,7 @@ import { LoadingScreen } from '@/components/splash/loading-screen';
 import { StartScreen } from '@/components/splash/start-screen';
 import { initAudio, startMusic } from '@/game/audio/engine';
 import { applySavedAudioSettings } from '@/game/state/audio-store';
+import { initAnalytics } from '@/services/analytics';
 import { useMetaStore } from '@/game/state/meta-store';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -38,6 +39,7 @@ export default function RootLayout() {
   // point in `audio/engine.ts` is a no-op until it resolves, which at worst
   // costs the very first tap its click.
   useEffect(() => {
+    initAnalytics();
     // Before init, so the engine builds its gain nodes at the saved level
     // rather than at full and then correcting.
     applySavedAudioSettings();

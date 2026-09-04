@@ -14,6 +14,7 @@ import Animated, {
 import { GamePressable } from '@/components/ui/game-pressable';
 import { ADS_ENABLED } from '@/constants/features';
 import { BattleColors, Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
+import { RUN_REWARD_MULTIPLIER } from '@/game/data/balance';
 import { formatInt, formatNumber } from '@/game/core/numbers';
 import type { RunSummary } from '@/game/core/types';
 
@@ -105,8 +106,9 @@ function RunOverPanel({ result, onRestart, onExit }: GameOverProps & { result: R
   const statsReveal = useSharedValue(0);
 
   const wave = useCountUp(result.waveReached);
-  const scrap = useCountUp(result.scrapEarned);
-  const gems = useCountUp(result.gemsCollected);
+  // Shown at the banked figure — `bankRun` credits Scrap/Gems at RUN_REWARD_MULTIPLIER.
+  const scrap = useCountUp(result.scrapEarned * RUN_REWARD_MULTIPLIER);
+  const gems = useCountUp(result.gemsCollected * RUN_REWARD_MULTIPLIER);
 
   useEffect(() => {
     backdrop.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) });
@@ -206,12 +208,17 @@ const styles = StyleSheet.create({
   stat: {
     fontFamily: Fonts.grenzeSemiBold,
     fontSize: 22,
+    // Pin the line box to the glyphs so `alignItems: 'center'` on gemsRow
+    // centres against the visible text, not Grenze's oversized ascent.
+    lineHeight: 22,
+    includeFontPadding: false,
     color: MenuColors.text,
     textTransform: 'uppercase',
   },
-  statValue: { color: BattleColors.chargeAccent },
+  statValue: { color: BattleColors.chargeAccent, lineHeight: 22, includeFontPadding: false },
   gemsRow: { flexDirection: 'row', alignItems: 'center' },
-  gemIcon: { width: 15, height: 14, marginLeft: 4 },
+  // translateY nudges onto the optical centre — the gem's mass sits below its tip.
+  gemIcon: { width: 18, height: 16, marginLeft: 4, transform: [{ translateY: 1 }] },
   pill: {
     width: '78%',
     aspectRatio: 630 / 150,

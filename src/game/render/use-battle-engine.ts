@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSharedValue } from 'react-native-reanimated';
 
 import { consumeBattleEvents, resetBattleSfx } from '../audio/battle-sfx';
@@ -66,6 +66,15 @@ export function useBattleEngine(loadout: RunLoadout) {
   // param inside `createWorld` itself isn't visible to that check.
   const worldRef = useRef(createWorld(undefined, loadout));
   const publish = useBattleStore((s) => s.publish);
+
+  // `battle-store` is a module singleton, so on a fresh battle screen it still
+  // holds the *previous* run's snapshot — its `result` in particular. Push the
+  // fresh (result-less) world before paint so the run-over overlay can't flash
+  // the last run on the way in. Belt to `battle.tsx`'s `bankedResultRef`, which
+  // is what actually stops the stale reward being banked again.
+  useLayoutEffect(() => {
+    publish(worldRef.current);
+  }, [publish]);
 
   const vfx = useMemo(() => new VfxSystem(), []);
 

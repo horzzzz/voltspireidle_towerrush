@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,6 +9,7 @@ import { GamePressable } from '@/components/ui/game-pressable';
 import { openPrivacy, openTerms } from '@/constants/links';
 import { Fonts, MenuColors, MenuMaxWidth } from '@/constants/theme';
 import { useAudioSettingsStore } from '@/game/state/audio-store';
+import { reportEvent } from '@/services/analytics';
 
 const BACK_BUTTON = require('@/assets/images/ui/pill-button.png');
 
@@ -35,6 +36,10 @@ export default function SettingsScreen() {
   const [settings, setSettings] = useState<LocalSettings>(LOCAL_DEFAULTS);
   const set = (key: keyof LocalSettings) => (next: boolean) =>
     setSettings((s) => ({ ...s, [key]: next }));
+
+  useEffect(() => {
+    reportEvent('settings', { action: 'open' });
+  }, []);
 
   return (
     <View style={styles.container}>
